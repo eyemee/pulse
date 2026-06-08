@@ -1,0 +1,34 @@
+// Pulse — coordination store only. Nothing here is durable user data:
+// rows are deleted on leave, on staleness, or after a signal is delivered.
+// Chat text and video are NOT modeled — they ride WebRTC peer-to-peer and
+// never reach the server.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Presence {
+  id       String   @id // client-generated session uuid
+  lat      Float // ALREADY privacy-offset coords (raw is never stored)
+  lng      Float
+  busy     Boolean  @default(false) // true while in an active connection
+  lastSeen DateTime
+
+  @@index([lastSeen])
+}
+
+model Signal {
+  // Mailbox for connection requests + WebRTC signaling only.
+  id        String   @id @default(uuid())
+  toId      String // recipient session id
+  fromId    String // sender session id
+  type      String // request | accept | decline | offer | answer | ice | end
+  payload   String? // JSON string (SDP / ICE candidate)
+  createdAt DateTime @default(now())
+
+  @@index([toId])
+}
