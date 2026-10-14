@@ -7,7 +7,9 @@
 > - Testing alone: open `/?at=Tokyo` in one window and `/?at=Paris` in another
 >   (a private window, or a second browser). Each joins near that place without a
 >   location prompt, so you don't need DevTools Sensors. `?at=35.68,139.69` also works.
-> - Running locally after pulling: `npx prisma db push` then `npx prisma generate`
+> - Tests: `npm test` runs unit tests for session identity, input validation and the
+>   location privacy offset.
+> - Running locally after pulling: `npm install`, `npx prisma db push`, then `npx prisma generate`
 >   (Phase 4 adds a `Block` table).
 
 Welcome, and thanks for taking the time. **Pulse** is a working (mostly!) Next.js

@@ -65,6 +65,8 @@ I went through the four routes with curl and tried to break them as a second, ho
 7. **Validation.** Strict id and secret formats, a JSON payload required only for SDP/ICE, request body size caps, and chat capped at 2000 characters on both sides (it's peer-to-peer, so the server can't police it). I also removed a leftover ngrok host from the dev config.
 8. **Mapbox token.** Public tokens are visible in the page by design. The fix is a URL restriction in the Mapbox dashboard (Vercel domain + localhost), done at deploy time.
 
+**Dependencies.** `npm audit` flagged the starter's Next.js 16.2.7, including a critical advisory in the image optimizer, which is on by default. I upgraded to 16.4.1 (same major) and applied the non-breaking transitive fixes. What's left is inside the Prisma CLI (mysql2, deepmerge-ts, hono, valibot), which only runs at build time and isn't imported by the app. npm's suggested fix is a downgrade to Prisma 6, which would break the project, so I left it. I also turned off the `X-Powered-By` header.
+
 Checked and fine: SQL injection (Prisma parameterises, and the raw queries use tagged templates, which are parameterised too), XSS (React escapes chat text), CSRF (no cookies; the secret is in the body).
 
 Next, with more time: TURN relay-only, a full CSP, and block/report so people can protect themselves (which is where Phase 4 comes in).
