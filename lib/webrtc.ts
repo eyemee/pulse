@@ -145,7 +145,8 @@ export class PeerSession {
   }
 
   sendChat(text: string) {
-    this.safeSend({ t: "msg", text });
+    // Must match the "chat" tag the receiver checks in wireDataChannel.
+    this.safeSend({ t: "chat", text });
   }
 
   sendControl(ctrl: PeerControl) {
