@@ -22,6 +22,8 @@ const nextConfig: NextConfig = {
   // The floating "N" dev badge sat on top of the map UI (it covered the
   // online counter). Dev-only; no effect in production.
   devIndicators: false,
+  // Don't advertise the framework (X-Powered-By: Next.js).
+  poweredByHeader: false,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
