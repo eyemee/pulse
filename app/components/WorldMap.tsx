@@ -264,15 +264,17 @@ export default function WorldMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !camera) return;
-    const duration = prefersReducedMotion() ? 0 : undefined;
+    // Only pass duration when overriding it: an explicit `duration: undefined`
+    // replaces Mapbox's default and turns the camera into NaN.
+    const motion = prefersReducedMotion() ? { duration: 0 } : {};
     if (camera.kind === "fly") {
-      map.flyTo({ center: [camera.lng, camera.lat], zoom: camera.zoom, duration, essential: true });
+      map.flyTo({ center: [camera.lng, camera.lat], zoom: camera.zoom, ...motion, essential: true });
       return;
     }
     if (camera.points.length === 0) return;
     if (camera.points.length === 1) {
       const p = camera.points[0];
-      map.flyTo({ center: [p.lng, p.lat], zoom: 3.2, duration, essential: true });
+      map.flyTo({ center: [p.lng, p.lat], zoom: 3.2, ...motion, essential: true });
       return;
     }
     const lngs = camera.points.map((p) => p.lng);
@@ -282,7 +284,7 @@ export default function WorldMap({
         [Math.min(...lngs), Math.min(...lats)],
         [Math.max(...lngs), Math.max(...lats)],
       ],
-      { padding: 90, maxZoom: 5, duration },
+      { padding: 90, maxZoom: 5, ...motion },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera?.key, ready]);
