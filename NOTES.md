@@ -24,6 +24,23 @@ Assumptions and trade-offs:
 
 ## Phase 2: Make it good
 
+The idea: Pulse should feel like looking at Earth from orbit at night, where every light is a person. Real cities glow sodium-amber in night satellite photos, so that's the colour of a stranger, and it's the only saturated colour in the app. You're a cooler aurora-teal light so you can always find yourself. Everything else is navy glass that gets out of the way.
+
+What changed:
+- **The globe is the hero.** Mapbox globe projection with a navy atmosphere and faint stars. It's live behind the entry screen, slowly turning, and flies down to your light when you join, so the first thing you see is the world rather than a form.
+- **Lights that feel alive.** Each one breathes on its own rhythm (staggered, so the map shimmers instead of blinking in sync). Busy people dim and stop breathing but stay visible.
+- **You're drawn where others see you.** Your beacon sits at your offset position (join now returns it), not your real location, which makes the privacy promise visible and honest.
+- **The arc.** When you ask someone to talk, a great-circle line draws itself from you to them: dashed while waiting, solid once connected. It's the one bold moment, and it makes "a stranger 950 km away" tangible.
+- **The flow, tightened.** Requests come up from the bottom (thumb reach on phones) with a rough distance, a draining 30s bar, Accept focused, and Escape to decline. Calling is a small card with Cancel. Chat is a floating panel on desktop and a bottom sheet on phones, so the globe and arc stay in view. Video got mute and camera-off buttons and a mirrored self-view.
+- **Empty and error states that say what to do.** "You're the only light on right now" with Copy link. Location errors explain how to fix them.
+- **Copy rewritten** in plain, specific language ("Put me on the map", "Someone wants to talk", "About 950 km away").
+- **Details:** one typeface (Manrope), design tokens in `globals.css`, safe-area padding for notched phones, visible keyboard focus, `prefers-reduced-motion` respected (no spin, no breathing, instant fly-to), and screen-reader labels on every light.
+
+Trade-offs:
+- Distances are deliberately coarse ("Nearby", "About 950 km away"). Positions are already offset by 1–3 km, so more precision would be false and would leak more.
+- I kept everything on Tailwind plus a handful of CSS keyframes rather than adding an animation library.
+- Lights are DOM markers, which is fine for hundreds of people. At thousands I'd move them to a Mapbox circle layer with clustering.
+
 ## Phase 3: Make it secure
 
 I went through the four routes with curl and tried to break them as a second, hostile user. Ranked by impact:
