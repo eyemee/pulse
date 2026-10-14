@@ -2,7 +2,7 @@
 
 > **Submission notes (for reviewers)**
 >
-> - Live app: _Vercel URL added at deploy time_
+> - Live app: **https://pulse-two-kappa-92.vercel.app/**
 > - Write-up: [NOTES.md](NOTES.md), one section per phase.
 > - Testing alone: open `/?at=Tokyo` in one window and `/?at=Paris` in another
 >   (a private window, or a second browser). Each joins near that place without a
