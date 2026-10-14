@@ -1,20 +1,55 @@
 "use client";
 
 import { useState } from "react";
+import { searchPlaces } from "@/lib/places";
 
 // The entry screen sits over the live globe (which idles and spins behind
 // it), so the first thing anyone sees is the world, not a form.
+// Test mode: ?at=Tokyo (or ?at=35.68,139.69) joins as if you were there,
+// skipping the location prompt. Handy for one person playing several users
+// in different windows. It doesn't change what's trustworthy: a browser's
+// reported location can be faked with DevTools anyway.
+function parseCoords(at: string): { lat: number; lng: number } | null {
+  const m = at.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+
 export default function EntryGate({
   online,
+  testPlace,
   onReady,
 }: {
   online: number | null; // people on right now, or null while unknown
+  testPlace: string | null; // from ?at=
   onReady: (lat: number, lng: number) => Promise<void> | void;
 }) {
   const [status, setStatus] = useState<"idle" | "locating" | "error">("idle");
   const [error, setError] = useState<string>("");
 
+  async function enterAt(place: string) {
+    setStatus("locating");
+    try {
+      const coords = parseCoords(place) ?? (await searchPlaces(place))[0];
+      if (!coords) {
+        setStatus("error");
+        setError(`Couldn't find "${place}". Try a city name, or remove ?at= to use your real location.`);
+        return;
+      }
+      await onReady(coords.lat, coords.lng);
+    } catch {
+      setStatus("error");
+      setError("Couldn't reach Pulse. Check your connection and try again.");
+    }
+  }
+
   function enter() {
+    if (testPlace) {
+      void enterAt(testPlace);
+      return;
+    }
     if (!("geolocation" in navigator)) {
       setStatus("error");
       setError("This browser can't share a location, which Pulse needs to place your light.");
@@ -83,6 +118,13 @@ export default function EntryGate({
         >
           {status === "locating" ? "Finding you…" : "Put me on the map"}
         </button>
+
+        {testPlace && (
+          <p className="mt-3 max-w-md text-sm text-aurora">
+            Test mode: you&rsquo;ll join near {testPlace}. Remove <code>?at=</code> from the address
+            to use your real location.
+          </p>
+        )}
 
         {status === "error" && (
           <p role="alert" className="mt-4 max-w-md text-sm leading-relaxed text-signal">
