@@ -15,6 +15,11 @@ interface PeerCallbacks {
   onChannelClose: () => void;
 }
 
+// Chat is peer-to-peer, so the server can't enforce limits; each side caps
+// what it sends and ignores oversized messages from the other.
+export const MAX_CHAT_CHARS = 2000;
+const MAX_DC_MESSAGE_BYTES = 16 * 1024;
+
 const ICE_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
@@ -80,10 +85,11 @@ export class PeerSession {
       if (!this.closed) this.cb.onChannelClose();
     };
     dc.onmessage = (e) => {
+      if (typeof e.data !== "string" || e.data.length > MAX_DC_MESSAGE_BYTES) return;
       try {
-        const msg = JSON.parse(e.data as string);
+        const msg = JSON.parse(e.data);
         if (msg.t === "chat" && typeof msg.text === "string") {
-          this.cb.onChat(msg.text);
+          this.cb.onChat(msg.text.slice(0, MAX_CHAT_CHARS));
         } else if (msg.t === "ctrl" && typeof msg.ctrl === "string") {
           this.cb.onControl(msg.ctrl as PeerControl);
         }
@@ -152,7 +158,7 @@ export class PeerSession {
 
   sendChat(text: string) {
     // Must match the "chat" tag the receiver checks in wireDataChannel.
-    this.safeSend({ t: "chat", text });
+    this.safeSend({ t: "chat", text: text.slice(0, MAX_CHAT_CHARS) });
   }
 
   sendControl(ctrl: PeerControl) {
