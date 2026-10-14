@@ -184,6 +184,16 @@ export class PeerSession {
     return this.localStream;
   }
 
+  // Mute / camera-off without renegotiating: the track keeps flowing but
+  // carries silence / black frames, so toggling is instant.
+  setMicEnabled(enabled: boolean) {
+    this.localStream?.getAudioTracks().forEach((t) => (t.enabled = enabled));
+  }
+
+  setCameraEnabled(enabled: boolean) {
+    this.localStream?.getVideoTracks().forEach((t) => (t.enabled = enabled));
+  }
+
   stopVideo() {
     if (this.localStream) {
       for (const track of this.localStream.getTracks()) track.stop();

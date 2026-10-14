@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MAX_CHAT_CHARS } from "@/lib/webrtc";
+import { SendIcon, VideoIcon } from "./icons";
 
 export interface ChatMessage {
   id: number;
@@ -9,10 +10,13 @@ export interface ChatMessage {
   text: string;
 }
 
+// Floating glass panel on the right on desktop; a bottom sheet on phones so
+// the globe (and the arc to the other person) stays visible above it.
 export default function ChatPanel({
   messages,
   connected,
   videoBusy,
+  distanceLabel,
   onSend,
   onStartVideo,
   onEnd,
@@ -20,16 +24,22 @@ export default function ChatPanel({
   messages: ChatMessage[];
   connected: boolean;
   videoBusy: boolean;
+  distanceLabel: string | null;
   onSend: (text: string) => void;
   onStartVideo: () => void;
   onEnd: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
+
+  useEffect(() => {
+    if (connected) inputRef.current?.focus({ preventScroll: true });
+  }, [connected]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,47 +50,53 @@ export default function ChatPanel({
   }
 
   return (
-    <div className="absolute inset-y-0 right-0 z-20 flex w-full max-w-md flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl">
-      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <div>
-          <p className="font-semibold">Stranger</p>
-          <p className="text-xs text-zinc-500">
+    <aside
+      aria-label="Chat with stranger"
+      className="glass slide-in absolute inset-x-0 bottom-0 z-30 flex h-[70dvh] flex-col rounded-t-3xl shadow-[0_-20px_60px_rgba(0,0,0,0.45)] sm:inset-x-auto sm:inset-y-4 sm:right-4 sm:h-auto sm:w-[380px] sm:rounded-3xl"
+    >
+      <header className="flex items-center gap-3 border-b border-hairline px-5 py-4">
+        <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/5">
+          <span className="pulse-dot pointer-events-none" data-active="true" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold leading-tight text-moon">Stranger</p>
+          <p className={`text-xs ${connected ? "text-aurora" : "text-mist"}`}>
             {connected ? "Connected" : "Connecting…"}
           </p>
+          {distanceLabel && <p className="truncate text-xs text-mist">{distanceLabel}</p>}
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={onStartVideo}
-            disabled={!connected || videoBusy}
-            className="rounded-full border border-zinc-700 px-3 py-1.5 text-sm hover:border-zinc-500 disabled:opacity-40"
-          >
-            Video
-          </button>
-          <button
-            onClick={onEnd}
-            className="rounded-full bg-red-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-400"
-          >
-            End
-          </button>
-        </div>
+        <button
+          onClick={onStartVideo}
+          disabled={!connected || videoBusy}
+          aria-label="Start video"
+          title="Start video"
+          className="grid h-10 w-10 place-items-center rounded-full border border-hairline text-moon transition hover:bg-white/5 disabled:opacity-35"
+        >
+          <VideoIcon />
+        </button>
+        <button
+          onClick={onEnd}
+          className="h-10 rounded-full border border-signal/40 px-4 text-sm font-medium text-signal transition hover:bg-signal/10"
+        >
+          End chat
+        </button>
       </header>
 
-      <div className="flex-1 space-y-2 overflow-y-auto p-4">
+      <div className="flex-1 space-y-2 overflow-y-auto px-4 py-5" aria-live="polite">
         {messages.length === 0 && (
-          <p className="mt-8 text-center text-sm text-zinc-500">
-            Say hello. Messages are peer-to-peer and never stored.
+          <p className="mx-auto mt-6 max-w-[16rem] text-center text-sm leading-relaxed text-mist">
+            {connected
+              ? "You're connected. Messages go straight to them and aren't saved anywhere."
+              : "Opening a direct line to their browser…"}
           </p>
         )}
         {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`flex ${m.mine ? "justify-end" : "justify-start"}`}
-          >
+          <div key={m.id} className={`flex ${m.mine ? "justify-end" : "justify-start"}`}>
             <span
-              className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
+              className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[0.94rem] leading-snug ${
                 m.mine
-                  ? "bg-emerald-400 text-zinc-950"
-                  : "bg-zinc-800 text-zinc-100"
+                  ? "rounded-br-md bg-amber text-orbit"
+                  : "rounded-bl-md bg-white/[0.07] text-moon"
               }`}
             >
               {m.text}
@@ -90,23 +106,33 @@ export default function ChatPanel({
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={submit} className="flex gap-2 border-t border-zinc-800 p-3">
+      <form
+        onSubmit={submit}
+        className="flex items-center gap-2 border-t border-hairline p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      >
+        <label htmlFor="chat-input" className="sr-only">
+          Message
+        </label>
         <input
+          id="chat-input"
+          ref={inputRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           maxLength={MAX_CHAT_CHARS}
-          placeholder={connected ? "Type a message…" : "Connecting…"}
+          autoComplete="off"
+          placeholder={connected ? "Say something…" : "Connecting…"}
           disabled={!connected}
-          className="flex-1 rounded-full bg-zinc-900 px-4 py-2 text-sm outline-none placeholder:text-zinc-600 focus:ring-1 focus:ring-emerald-400 disabled:opacity-50"
+          className="h-11 flex-1 rounded-full bg-white/[0.06] px-4 text-[0.94rem] text-moon outline-none placeholder:text-mist/70 focus:bg-white/[0.09] focus:ring-1 focus:ring-aurora/60 focus-visible:outline-none disabled:opacity-50"
         />
         <button
           type="submit"
+          aria-label="Send"
           disabled={!connected || !draft.trim()}
-          className="rounded-full bg-emerald-400 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-40"
+          className="grid h-11 w-11 place-items-center rounded-full bg-amber text-orbit transition hover:bg-[#ffc37a] disabled:opacity-35"
         >
-          Send
+          <SendIcon />
         </button>
       </form>
-    </div>
+    </aside>
   );
 }

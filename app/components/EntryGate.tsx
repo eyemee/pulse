@@ -2,9 +2,13 @@
 
 import { useState } from "react";
 
+// The entry screen sits over the live globe (which idles and spins behind
+// it), so the first thing anyone sees is the world, not a form.
 export default function EntryGate({
+  online,
   onReady,
 }: {
+  online: number | null; // people on right now, or null while unknown
   onReady: (lat: number, lng: number) => Promise<void> | void;
 }) {
   const [status, setStatus] = useState<"idle" | "locating" | "error">("idle");
@@ -13,7 +17,7 @@ export default function EntryGate({
   function enter() {
     if (!("geolocation" in navigator)) {
       setStatus("error");
-      setError("Your browser doesn't support location access.");
+      setError("This browser can't share a location, which Pulse needs to place your light.");
       return;
     }
     setStatus("locating");
@@ -21,15 +25,15 @@ export default function EntryGate({
       (pos) => {
         Promise.resolve(onReady(pos.coords.latitude, pos.coords.longitude)).catch(() => {
           setStatus("error");
-          setError("Couldn't connect to Pulse right now. Please try again.");
+          setError("Couldn't reach Pulse. Check your connection and try again.");
         });
       },
       (err) => {
         setStatus("error");
         setError(
           err.code === err.PERMISSION_DENIED
-            ? "Location permission is required to place you on the map."
-            : "Couldn't get your location. Please try again.",
+            ? "Location is blocked for this site. Allow it in the address bar, then try again."
+            : "Couldn't find your location. Try again, or check that location services are on.",
         );
       },
       // High accuracy + maximumAge:0 forces a fresh fix (Wi-Fi/GPS scan)
@@ -38,31 +42,59 @@ export default function EntryGate({
     );
   }
 
+  const countLine =
+    online === null
+      ? null
+      : online === 0
+        ? "No one's on right now. Yours could be the first light."
+        : online === 1
+          ? "1 light is on right now."
+          : `${online.toLocaleString("en-US")} lights are on right now.`;
+
   return (
-    <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-8 bg-zinc-950 p-6 text-zinc-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold tracking-tight">Pulse</h1>
-        <p className="mt-2 max-w-sm text-zinc-400">
-          A living globe of anonymous strangers. Drop onto the map and connect.
+    <div className="absolute inset-0 z-40 flex items-end bg-[radial-gradient(120%_90%_at_0%_100%,rgba(8,17,40,0.95)_20%,rgba(8,17,40,0.55)_55%,rgba(8,17,40,0.1)_100%)] sm:items-center">
+      <section className="rise w-full max-w-xl px-6 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:px-14 sm:pb-0">
+        <p className="mb-10 flex items-center gap-2.5 text-lg font-semibold tracking-tight text-moon">
+          <span className="relative inline-flex h-2.5 w-2.5">
+            <span className="pulse-dot pointer-events-none !h-2.5 !w-2.5" aria-hidden="true" />
+          </span>
+          pulse
         </p>
-      </div>
 
-      <button
-        onClick={enter}
-        disabled={status === "locating"}
-        className="rounded-full bg-emerald-400 px-8 py-3 font-semibold text-zinc-950 transition hover:bg-emerald-300 disabled:opacity-60"
-      >
-        {status === "locating" ? "Locating…" : "Enter Pulse"}
-      </button>
+        <h1 className="text-[2.6rem] font-light leading-[1.05] tracking-[-0.02em] text-moon sm:text-6xl">
+          Strangers, lit up across the night.
+        </h1>
+        <p className="mt-5 max-w-md text-base leading-relaxed text-mist sm:text-lg">
+          Every light is someone online right now. Tap one to ask for a chat. If they say yes, you
+          talk by text or video, and nothing is kept.
+        </p>
 
-      {status === "error" && (
-        <p className="max-w-sm text-center text-sm text-red-400">{error}</p>
-      )}
+        {countLine && (
+          <p className="mt-6 flex items-start gap-2 text-sm leading-5 text-moon" aria-live="polite">
+            <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-amber shadow-[0_0_8px_2px_rgba(255,180,92,0.7)]" />
+            {countLine}
+          </p>
+        )}
 
-      <p className="max-w-sm text-center text-xs text-zinc-500">
-        No sign-up. Your dot is placed 1–3&nbsp;km from your real location.
-        Nothing is stored — closing the tab ends everything.
-      </p>
+        <button
+          onClick={enter}
+          disabled={status === "locating"}
+          className="mt-8 inline-flex h-13 items-center justify-center rounded-full bg-amber px-8 text-base font-semibold text-orbit shadow-[0_0_32px_rgba(255,180,92,0.35)] transition hover:bg-[#ffc37a] active:scale-[0.98] disabled:cursor-wait disabled:opacity-70"
+        >
+          {status === "locating" ? "Finding you…" : "Put me on the map"}
+        </button>
+
+        {status === "error" && (
+          <p role="alert" className="mt-4 max-w-md text-sm leading-relaxed text-signal">
+            {error}
+          </p>
+        )}
+
+        <p className="mt-8 max-w-sm text-xs leading-relaxed text-mist/80">
+          Your light is placed 1–3 km from where you are, in a new spot every visit. No account, no
+          history. Close the tab and you&rsquo;re gone.
+        </p>
+      </section>
     </div>
   );
 }

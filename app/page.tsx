@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import EntryGate from "./components/EntryGate";
-import WorldMap from "./components/WorldMap";
+import WorldMap, { type ArcState } from "./components/WorldMap";
 import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
-import { join, leave, newSessionSecret, poll, sendSignal } from "@/lib/api";
+import { join, leave, newSessionSecret, onlineCount, poll, sendSignal } from "@/lib/api";
+import { distanceKm, formatDistance, type LatLng } from "@/lib/geo";
+import { LinkIcon, LocateIcon } from "./components/icons";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
 import { startTicker } from "@/lib/ticker";
@@ -35,9 +37,11 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(
-    null,
-  );
+  // Our public position (privacy-offset), as everyone else sees it.
+  const [me, setMe] = useState<LatLng | null>(null);
+  const [online, setOnline] = useState<number | null>(null);
+  const [recenterKey, setRecenterKey] = useState(0);
+  const [linkCopied, setLinkCopied] = useState(false);
   // Raw location kept in memory only, so we can re-join if we get reaped.
   const myLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -391,50 +395,140 @@ export default function Home() {
   }, [secret, phase]);
 
   async function handleReady(lat: number, lng: number) {
-    setMyLocation({ lat, lng });
     myLocationRef.current = { lat, lng };
-    myIdRef.current = await join(secret, lat, lng);
+    const joined = await join(secret, lat, lng);
+    myIdRef.current = joined.id;
+    setMe({ lat: joined.lat, lng: joined.lng });
     setPhase("live");
   }
 
-  if (phase === "gate") {
-    return <EntryGate onReady={handleReady} />;
+  // Entry screen: show that the map is alive before joining.
+  useEffect(() => {
+    if (phase !== "gate") return;
+    let active = true;
+    const load = async () => {
+      const n = await onlineCount();
+      if (active && n !== null) setOnline(n);
+    };
+    void load();
+    const id = window.setInterval(load, 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, [phase]);
+
+  const live = phase === "live";
+  const inChat = conn.kind === "connecting" || conn.kind === "connected";
+  const activePeerId = conn.kind === "idle" ? null : conn.peerId;
+  const activePeer = activePeerId ? peers.find((p) => p.id === activePeerId) : undefined;
+  const distanceLabel = me && activePeer ? formatDistance(distanceKm(me, activePeer)) : null;
+  const arc: ArcState =
+    conn.kind === "requesting" || conn.kind === "incoming" || conn.kind === "connecting"
+      ? "calling"
+      : conn.kind === "connected"
+        ? "connected"
+        : "none";
+  const showEmpty = live && conn.kind === "idle" && peers.length === 0;
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.origin);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      showNotice("Couldn't copy. The address bar has the link.");
+    }
   }
 
-  const inChat = conn.kind === "connecting" || conn.kind === "connected";
-
   return (
-    <main className="fixed inset-0 overflow-hidden">
+    <main className="fixed inset-0 overflow-hidden bg-orbit">
       <WorldMap
         peers={peers}
-        me={myLocation}
-        onPeerClick={requestConnection}
+        me={me}
+        live={live}
+        activePeerId={activePeerId}
+        arc={arc}
         canConnect={conn.kind === "idle"}
+        recenterKey={recenterKey}
+        onPeerClick={requestConnection}
       />
 
+      {!live && <EntryGate online={online} onReady={handleReady} />}
+
+      {live && (
+        <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
+          <div className="glass rise pointer-events-auto flex items-center gap-3 rounded-full py-2 pl-4 pr-4">
+            <span className="text-base font-semibold tracking-tight text-moon">pulse</span>
+            <span className="h-4 w-px bg-hairline" aria-hidden="true" />
+            <span className="flex items-center gap-2 text-sm text-mist" aria-live="polite">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber shadow-[0_0_8px_2px_rgba(255,180,92,0.7)]" />
+              {peers.length + 1} online
+            </span>
+          </div>
+          <button
+            onClick={() => setRecenterKey((k) => k + 1)}
+            aria-label="Back to my light"
+            title="Back to my light"
+            className={`glass rise pointer-events-auto grid h-11 w-11 place-items-center rounded-full text-aurora transition hover:bg-white/10 ${inChat ? "sm:mr-[396px]" : ""}`}
+          >
+            <LocateIcon />
+          </button>
+        </header>
+      )}
+
       {notice && (
-        <div className="absolute left-1/2 top-20 z-30 -translate-x-1/2 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
-          {notice}
+        <div className="pointer-events-none absolute inset-x-0 top-20 z-50 flex justify-center px-4">
+          <p role="status" className="glass rise rounded-full px-4 py-2.5 text-sm text-moon shadow-lg">
+            {notice}
+          </p>
         </div>
       )}
 
-      {conn.kind === "requesting" && (
-        <div className="absolute left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
-          <span>Requesting connection…</span>
+      {showEmpty && (
+        <section className="glass rise absolute bottom-4 left-4 right-4 z-20 rounded-3xl p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:right-auto sm:max-w-sm">
+          <h2 className="font-semibold text-moon">You&rsquo;re the only light on right now.</h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-mist">
+            Open Pulse in a second window to try it, or send the link to someone. Their light
+            appears here as soon as they join.
+          </p>
           <button
-            onClick={cancelRequest}
-            className="rounded-full bg-zinc-700 px-3 py-1 text-xs hover:bg-zinc-600"
+            onClick={copyLink}
+            className="mt-4 inline-flex h-10 items-center gap-2 rounded-full border border-hairline px-4 text-sm font-medium text-moon transition hover:bg-white/5"
           >
-            Cancel
+            <LinkIcon width={16} height={16} />
+            {linkCopied ? "Link copied" : "Copy link"}
           </button>
+        </section>
+      )}
+
+      {conn.kind === "requesting" && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:bottom-6">
+          <div className="glass rise pointer-events-auto flex w-full max-w-sm items-center gap-4 rounded-full py-2.5 pl-3 pr-2.5">
+            <span className="ripple relative grid h-10 w-10 shrink-0 place-items-center rounded-full">
+              <span className="pulse-dot pointer-events-none" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1" role="status">
+              <p className="text-sm font-semibold text-moon">Asking to connect…</p>
+              {distanceLabel && <p className="truncate text-xs text-mist">{distanceLabel}</p>}
+            </div>
+            <button
+              onClick={cancelRequest}
+              className="h-10 rounded-full border border-hairline px-4 text-sm font-medium text-moon transition hover:bg-white/5"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
       {conn.kind === "incoming" && (
         <ConnectionPrompt
-          title="A stranger wants to connect"
+          title="Someone wants to talk"
+          subtitle={distanceLabel ?? "A stranger on the map"}
           acceptLabel="Accept"
           declineLabel="Decline"
+          timeoutMs={REQUEST_TIMEOUT_MS}
           onAccept={acceptIncoming}
           onDecline={declineIncoming}
         />
@@ -445,6 +539,7 @@ export default function Home() {
           messages={messages}
           connected={conn.kind === "connected"}
           videoBusy={video !== "none"}
+          distanceLabel={distanceLabel}
           onSend={(text) => {
             peerRef.current?.sendChat(text);
             addMessage(true, text);
@@ -455,17 +550,19 @@ export default function Home() {
       )}
 
       {video === "requesting" && (
-        <div className="absolute bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
-          Waiting for stranger to accept video…
+        <div className="pointer-events-none absolute inset-x-0 top-20 z-40 flex justify-center px-4">
+          <p role="status" className="glass rise rounded-full px-4 py-2.5 text-sm text-moon">
+            Waiting for them to turn on video…
+          </p>
         </div>
       )}
 
       {video === "incoming" && (
         <ConnectionPrompt
-          title="Start video call?"
-          subtitle="The stranger wants to turn on video."
+          title="They'd like to turn on video"
+          subtitle="Your camera and mic turn on only if you accept."
           acceptLabel="Accept"
-          declineLabel="Decline"
+          declineLabel="Not now"
           onAccept={acceptVideo}
           onDecline={declineVideo}
         />
@@ -475,6 +572,8 @@ export default function Home() {
         <VideoPanel
           localStream={localStream}
           remoteStream={remoteStream}
+          onToggleMic={(on) => peerRef.current?.setMicEnabled(on)}
+          onToggleCamera={(on) => peerRef.current?.setCameraEnabled(on)}
           onEnd={endVideo}
         />
       )}
