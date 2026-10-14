@@ -1,5 +1,5 @@
-import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isValidPeerId, isValidSecret, publicIdFromSecret, readJson } from "@/lib/session";
 import type { SignalType } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -17,24 +17,22 @@ const VALID_TYPES: SignalType[] = [
 
 const MAX_PAYLOAD = 64 * 1024; // SDP/ICE are small; cap to be safe.
 
-// POST /api/signal — body { fromId, toId, type, payload? }
+// POST /api/signal — body { secret, toId, type, payload? }
 // Drops one message into the recipient's mailbox. Also manages the `busy`
 // flag so a user can only be in one connection at a time.
-export async function POST(request: NextRequest) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "invalid body" }, { status: 400 });
+export async function POST(request: Request) {
+  const body = await readJson(request, MAX_PAYLOAD + 1024);
+  if (!body) return Response.json({ error: "invalid body" }, { status: 400 });
+
+  const { secret, toId, type, payload } = body;
+  if (!isValidSecret(secret)) {
+    return Response.json({ error: "invalid session" }, { status: 400 });
   }
-
-  const { fromId, toId, type, payload } = (body ?? {}) as Record<
-    string,
-    unknown
-  >;
-
-  if (typeof fromId !== "string" || typeof toId !== "string") {
-    return Response.json({ error: "invalid ids" }, { status: 400 });
+  // The sender is whoever holds the secret. It used to be a free-form
+  // `fromId` in the body, so anyone could send signals as anyone.
+  const fromId = publicIdFromSecret(secret);
+  if (!isValidPeerId(toId) || toId === fromId) {
+    return Response.json({ error: "invalid recipient" }, { status: 400 });
   }
   if (typeof type !== "string" || !VALID_TYPES.includes(type as SignalType)) {
     return Response.json({ error: "invalid type" }, { status: 400 });

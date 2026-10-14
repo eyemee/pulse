@@ -1,21 +1,22 @@
-import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STALE_MS, SIGNAL_TTL_MS } from "@/lib/presence";
+import { isValidSecret, publicIdFromSecret, readJson } from "@/lib/session";
 import type { PollResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/poll?id= — the single endpoint that drives the live map.
-// It (1) heartbeats the caller, (2) reaps stale presence + orphan signals,
-// (3) returns the filtered online peers, and (4) drains this user's mailbox.
-export async function GET(request: NextRequest) {
-  const params = request.nextUrl.searchParams;
-  const id = params.get("id");
-
-  if (!id) {
-    return Response.json({ error: "missing id" }, { status: 400 });
+// POST /api/poll — body { secret }. The single endpoint that drives the live
+// map. It (1) heartbeats the caller, (2) reaps stale presence + orphan
+// signals, (3) returns the filtered online peers, and (4) drains this user's
+// mailbox. POST rather than GET so the secret never lands in a URL (and from
+// there in server, proxy or browser history logs).
+export async function POST(request: Request) {
+  const body = await readJson(request, 1024);
+  if (!body || !isValidSecret(body.secret)) {
+    return Response.json({ error: "invalid session" }, { status: 400 });
   }
+  const id = publicIdFromSecret(body.secret);
 
   const now = Date.now();
   const staleCutoff = new Date(now - STALE_MS);
@@ -32,6 +33,12 @@ export async function GET(request: NextRequest) {
   // slept, DB restarted). Tell the client so it can re-join instead of
   // silently staying invisible to everyone else.
   const present = heartbeat.count > 0;
+  if (!present) {
+    // Not joined (or reaped): nothing to see until /api/join succeeds. This
+    // also stops unjoined callers from scraping everyone's positions.
+    const empty: PollResponse = { present: false, peers: [], signals: [] };
+    return Response.json(empty);
+  }
 
   // 2) Reap stale presence rows and orphaned signals (independent deletes —
   // no atomicity needed, and avoids transactions over a PgBouncer pooler).

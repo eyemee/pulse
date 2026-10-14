@@ -1,24 +1,18 @@
-import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isValidSecret, publicIdFromSecret, readJson } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// POST /api/leave — body { id }. Removes the presence row and any pending
-// signals to/from this user. Called via navigator.sendBeacon on tab close, so
-// the body may arrive as text — parse defensively.
-export async function POST(request: NextRequest) {
-  let id: string | undefined;
-  try {
-    const text = await request.text();
-    id = text ? (JSON.parse(text)?.id as string | undefined) : undefined;
-  } catch {
-    id = undefined;
+// POST /api/leave — body { secret }. Removes the caller's presence row and
+// any pending signals to/from them. Called via navigator.sendBeacon on tab
+// close, so the body arrives as text/plain; readJson handles both.
+export async function POST(request: Request) {
+  const body = await readJson(request);
+  if (!body || !isValidSecret(body.secret)) {
+    return Response.json({ error: "invalid session" }, { status: 400 });
   }
-
-  if (typeof id !== "string" || !id) {
-    return Response.json({ error: "invalid id" }, { status: 400 });
-  }
+  const id = publicIdFromSecret(body.secret);
 
   // Independent cleanup deletes — no atomicity needed (and interactive
   // transactions are unreliable over a PgBouncer pooler).

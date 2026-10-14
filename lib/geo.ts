@@ -8,9 +8,12 @@ const KM_PER_DEG_LAT = 111.32;
 export function applyPrivacyOffset(
   lat: number,
   lng: number,
+  // Optional [0,1) pair; pass a per-session seed so re-joins reuse the same
+  // offset instead of leaking fresh samples around the real location.
+  seed: [number, number] = [Math.random(), Math.random()],
 ): { lat: number; lng: number } {
-  const distanceKm = 1 + Math.random() * 2; // 1–3 km
-  const bearing = Math.random() * 2 * Math.PI; // random direction
+  const distanceKm = 1 + seed[0] * 2; // 1–3 km
+  const bearing = seed[1] * 2 * Math.PI; // random direction
 
   const dLat = (distanceKm * Math.cos(bearing)) / KM_PER_DEG_LAT;
   const latRad = (lat * Math.PI) / 180;

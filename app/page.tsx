@@ -6,7 +6,7 @@ import WorldMap from "./components/WorldMap";
 import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
-import { join, leave, poll, sendSignal } from "@/lib/api";
+import { join, leave, newSessionSecret, poll, sendSignal } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
 import { startTicker } from "@/lib/ticker";
@@ -25,7 +25,11 @@ const REQUEST_TIMEOUT_MS = 30_000;
 
 export default function Home() {
   const [phase, setPhase] = useState<"gate" | "live">("gate");
-  const [sessionId] = useState(() => crypto.randomUUID());
+  // Private session key: never shown to anyone, only sent in POST bodies.
+  // The public id peers see is sha256(secret), computed by the server.
+  const [secret] = useState(() => newSessionSecret());
+  // Our own public id, as returned by /api/join.
+  const myIdRef = useRef<string | null>(null);
   const [peers, setPeers] = useState<PeerDot[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -71,7 +75,7 @@ export default function Home() {
   // drop), otherwise we stay "busy" and nobody can request us again.
   function teardown(message?: string, notifyPeerId?: string) {
     if (requestTimer.current) clearTimeout(requestTimer.current);
-    if (notifyPeerId) void sendSignal(sessionId, notifyPeerId, "end");
+    if (notifyPeerId) void sendSignal(secret, notifyPeerId, "end");
     missingPolls.current = 0;
     peerRef.current?.close();
     peerRef.current = null;
@@ -86,7 +90,7 @@ export default function Home() {
   function startPeer(peerId: string, initiator: boolean) {
     const ps = new PeerSession(initiator, {
       onSignal: (type: DescType, payload: string) => {
-        void sendSignal(sessionId, peerId, type, payload);
+        void sendSignal(secret, peerId, type, payload);
       },
       onChat: (text) => addMessage(false, text),
       onControl: (ctrl) => handleControl(ctrl),
@@ -144,13 +148,13 @@ export default function Home() {
   function requestConnection(peerId: string) {
     if (connRef.current.kind !== "idle") return;
     setConn({ kind: "requesting", peerId });
-    void sendSignal(sessionId, peerId, "request");
+    void sendSignal(secret, peerId, "request");
     requestTimer.current = setTimeout(() => {
       if (
         connRef.current.kind === "requesting" &&
         connRef.current.peerId === peerId
       ) {
-        void sendSignal(sessionId, peerId, "end");
+        void sendSignal(secret, peerId, "end");
         teardown("No answer.");
       }
     }, REQUEST_TIMEOUT_MS);
@@ -158,7 +162,7 @@ export default function Home() {
 
   function cancelRequest() {
     if (connRef.current.kind === "requesting") {
-      void sendSignal(sessionId, connRef.current.peerId, "end");
+      void sendSignal(secret, connRef.current.peerId, "end");
     }
     teardown();
   }
@@ -167,20 +171,20 @@ export default function Home() {
     if (connRef.current.kind !== "incoming") return;
     const peerId = connRef.current.peerId;
     startPeer(peerId, false);
-    void sendSignal(sessionId, peerId, "accept");
+    void sendSignal(secret, peerId, "accept");
     setConn({ kind: "connecting", peerId });
   }
 
   function declineIncoming() {
     if (connRef.current.kind !== "incoming") return;
-    void sendSignal(sessionId, connRef.current.peerId, "decline");
+    void sendSignal(secret, connRef.current.peerId, "decline");
     setConn({ kind: "idle" });
   }
 
   function endConnection() {
     const c = connRef.current;
     if (c.kind === "connecting" || c.kind === "connected") {
-      void sendSignal(sessionId, c.peerId, "end");
+      void sendSignal(secret, c.peerId, "end");
     }
     teardown();
   }
@@ -227,7 +231,7 @@ export default function Home() {
         if (connRef.current.kind === "idle") {
           setConn({ kind: "incoming", peerId: sig.fromId });
         } else {
-          void sendSignal(sessionId, sig.fromId, "decline");
+          void sendSignal(secret, sig.fromId, "decline");
         }
         break;
       }
@@ -308,7 +312,7 @@ export default function Home() {
   });
 
   useEffect(() => {
-    if (phase !== "live" || !sessionId) return;
+    if (phase !== "live" || !secret) return;
     let active = true;
     let inFlight = false;
 
@@ -317,11 +321,11 @@ export default function Home() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const data = await poll(sessionId);
+        const data = await poll(secret);
         if (!active) return;
         if (!data.present && myLocationRef.current) {
           const { lat, lng } = myLocationRef.current;
-          await join(sessionId, lat, lng);
+          await join(secret, lat, lng);
         }
         setPeers(data.peers);
         for (const s of data.signals) processSignalRef.current(s);
@@ -345,7 +349,7 @@ export default function Home() {
       stop();
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [phase, sessionId]);
+  }, [phase, secret]);
 
   // If a request arrives while the tab is in the background, say so in the
   // tab title; the prompt itself is invisible until they switch back.
@@ -364,20 +368,20 @@ export default function Home() {
   }, [conn.kind]);
 
   useEffect(() => {
-    if (!sessionId || phase !== "live") return;
-    const onLeave = () => leave(sessionId);
+    if (!secret || phase !== "live") return;
+    const onLeave = () => leave(secret);
     window.addEventListener("pagehide", onLeave);
     window.addEventListener("beforeunload", onLeave);
     return () => {
       window.removeEventListener("pagehide", onLeave);
       window.removeEventListener("beforeunload", onLeave);
     };
-  }, [sessionId, phase]);
+  }, [secret, phase]);
 
   async function handleReady(lat: number, lng: number) {
     setMyLocation({ lat, lng });
     myLocationRef.current = { lat, lng };
-    await join(sessionId, lat, lng);
+    myIdRef.current = await join(secret, lat, lng);
     setPhase("live");
   }
 
