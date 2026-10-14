@@ -85,7 +85,20 @@ export class PeerSession {
     };
   }
 
-  async handleSignal(type: DescType, payload: string) {
+  // Signals arrive in batches from the poll and are not guaranteed to be in
+  // send order (the offer and its ICE candidates are separate HTTP requests).
+  // Process them one at a time so a candidate can never race ahead of the
+  // description it belongs to.
+  private queue: Promise<void> = Promise.resolve();
+
+  handleSignal(type: DescType, payload: string): Promise<void> {
+    this.queue = this.queue
+      .then(() => this.processSignal(type, payload))
+      .catch((err) => console.warn("[pulse] signal handling failed", err));
+    return this.queue;
+  }
+
+  private async processSignal(type: DescType, payload: string) {
     if (this.closed) return;
     const data = JSON.parse(payload);
 
@@ -107,8 +120,11 @@ export class PeerSession {
     this.ignoreOffer = !this.polite && offerCollision;
     if (this.ignoreOffer) return;
 
-    await this.flushPendingCandidates();
     await this.pc.setRemoteDescription(desc);
+    // Candidates can only be added once a remote description exists. Flushing
+    // them before setRemoteDescription (as this used to) made every queued
+    // candidate fail silently, so the peers never found a route.
+    await this.flushPendingCandidates();
     if (desc.type === "offer") {
       await this.pc.setLocalDescription();
       if (this.pc.localDescription) {
