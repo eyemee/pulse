@@ -9,7 +9,7 @@
   --orbit: #081128; /* space / page background */
   --ocean: #0e1c3a; /* map water, deep panels */
   --glass: rgba(14, 26, 54, 0.72); /* frosted panels over the globe */
-  --glass-strong: rgba(10, 19, 42, 0.9);
+  --glass-strong: rgba(10, 19, 42, 0.96);
   --hairline: rgba(170, 190, 230, 0.14);
   --amber: #ffb45c; /* strangers' lights, primary actions */
   --amber-deep: #f59a3c;
@@ -50,10 +50,25 @@ body {
   -webkit-backdrop-filter: blur(18px) saturate(140%);
   border: 1px solid var(--hairline);
 }
+/* For panels with lots of text (chat, search results): almost opaque, so
+   map labels underneath don't show through the words. */
+.glass-solid {
+  background: var(--glass-strong);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--hairline);
+}
 
-:focus-visible {
+/* Keyboard focus for buttons, links and map lights. Text inputs are left
+   out: they show focus with their own softer ring, and this outline would
+   draw a hard box on top of it. */
+:focus-visible:not(input, textarea) {
   outline: 2px solid var(--aurora);
   outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
 }
 
 /* ---------- Lights on the globe ---------- */
@@ -121,7 +136,40 @@ body {
     0 0 0 3px rgba(8, 17, 40, 0.9),
     0 0 0 5px rgba(143, 227, 216, 0.55),
     0 0 22px 6px rgba(143, 227, 216, 0.35);
+  cursor: default;
+}
+/* "You" under your own light for the first few seconds after joining. */
+.pulse-me-label {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(8, 17, 40, 0.85);
+  border: 1px solid rgba(143, 227, 216, 0.45);
+  color: var(--aurora);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
   pointer-events: none;
+  transition: opacity 600ms ease;
+}
+.pulse-me-label.is-hidden {
+  opacity: 0;
+}
+
+/* A new conversation somewhere: both lights flare once. */
+@keyframes spark {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 210, 154, 0.9);
+  }
+  100% {
+    box-shadow: 0 0 0 22px rgba(255, 210, 154, 0);
+  }
+}
+.pulse-dot.spark {
+  animation: spark 1.4s ease-out 2;
 }
 
 @keyframes breathe {

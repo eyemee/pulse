@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import EntryGate from "./components/EntryGate";
-import WorldMap, { type ArcState } from "./components/WorldMap";
+import WorldMap, { type ArcState, type CameraCommand } from "./components/WorldMap";
+import SearchBox from "./components/SearchBox";
 import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
-import { join, leave, newSessionSecret, onlineCount, poll, sendSignal } from "@/lib/api";
+import { block, join, leave, newSessionSecret, onlineCount, poll, sendSignal } from "@/lib/api";
 import { distanceKm, formatDistance, type LatLng } from "@/lib/geo";
-import { LinkIcon, LocateIcon } from "./components/icons";
+import { LinkIcon, LocateIcon, NextIcon } from "./components/icons";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
 import { startTicker } from "@/lib/ticker";
@@ -25,6 +26,12 @@ type VideoState = "none" | "requesting" | "incoming" | "active";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
+const noopSubscribe = () => () => {};
+function readTestPlace(): string | null {
+  const at = new URLSearchParams(window.location.search).get("at")?.trim();
+  return at ? at.slice(0, 80) : null;
+}
+
 export default function Home() {
   const [phase, setPhase] = useState<"gate" | "live">("gate");
   // Private session key: never shown to anyone, only sent in POST bodies.
@@ -33,6 +40,23 @@ export default function Home() {
   // Our own public id, as returned by /api/join.
   const myIdRef = useRef<string | null>(null);
   const [peers, setPeers] = useState<PeerDot[]>([]);
+  // Other people's live conversations (id pairs), drawn as arcs.
+  const [pairs, setPairs] = useState<[string, string][]>([]);
+  // People you blocked this session: hidden immediately, before the server's
+  // next poll confirms it.
+  const blockedRef = useRef<Set<string>>(new Set());
+  const [camera, setCamera] = useState<CameraCommand | null>(null);
+  const cameraKey = useRef(0);
+  const nextIndex = useRef(0);
+  // They've unblurred your video (reveal-to-see).
+  const [theyRevealed, setTheyRevealed] = useState(false);
+  // ?at=Place test mode. Read from the URL on the client; the server render
+  // sees null and React swaps in the real value after hydration.
+  const testPlace = useSyncExternalStore(
+    noopSubscribe,
+    () => readTestPlace(),
+    () => null,
+  );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -86,6 +110,7 @@ export default function Home() {
     setLocalStream(null);
     setRemoteStream(null);
     setVideo("none");
+    setTheyRevealed(false);
     setMessages([]);
     setConn({ kind: "idle" });
     if (message) showNotice(message);
@@ -145,6 +170,10 @@ export default function Home() {
         setLocalStream(null);
         setRemoteStream(null);
         setVideo("none");
+        setTheyRevealed(false);
+        break;
+      case "video-revealed":
+        if (videoRef.current === "active") setTheyRevealed(true);
         break;
     }
   }
@@ -239,6 +268,40 @@ export default function Home() {
     setLocalStream(null);
     setRemoteStream(null);
     setVideo("none");
+    setTheyRevealed(false);
+  }
+
+  // Block: end whatever is happening with this person and hide you from each
+  // other for the rest of the session (server-enforced, see /api/block).
+  function blockPeer(peerId: string) {
+    blockedRef.current.add(peerId);
+    setPeers((prev) => prev.filter((p) => p.id !== peerId));
+    teardown("Blocked. You won't see each other again this session.");
+    void block(secret, peerId).then((ok) => {
+      if (!ok) showNotice("Couldn't block right now. They're hidden on your map anyway.");
+    });
+  }
+
+  function flyTo(lng: number, lat: number, zoom: number) {
+    setCamera({ key: ++cameraKey.current, kind: "fly", lng, lat, zoom });
+  }
+
+  // "Next light": hop between people, nearest first, available before busy.
+  function nextLight() {
+    if (peers.length === 0) return;
+    const sorted = [...peers].sort((a, b) => {
+      if (a.busy !== b.busy) return a.busy ? 1 : -1;
+      return me ? distanceKm(me, a) - distanceKm(me, b) : 0;
+    });
+    const p = sorted[nextIndex.current % sorted.length];
+    nextIndex.current += 1;
+    flyTo(p.lng, p.lat, 4.5);
+  }
+
+  // "N online": zoom out to show everyone, you included.
+  function showEveryone() {
+    const points = [...peers.map((p) => ({ lat: p.lat, lng: p.lng })), ...(me ? [me] : [])];
+    setCamera({ key: ++cameraKey.current, kind: "fit", points });
   }
 
   function processSignal(sig: SignalMsg) {
@@ -343,9 +406,11 @@ export default function Home() {
           const { lat, lng } = myLocationRef.current;
           await join(secret, lat, lng);
         }
-        setPeers(data.peers);
+        const visible = data.peers.filter((p) => !blockedRef.current.has(p.id));
+        setPeers(visible);
+        setPairs(data.pairs ?? []);
         for (const s of data.signals) processSignalRef.current(s);
-        checkPeerPresentRef.current(data.peers);
+        checkPeerPresentRef.current(visible);
       } catch {
       } finally {
         inFlight = false;
@@ -451,29 +516,49 @@ export default function Home() {
         arc={arc}
         canConnect={conn.kind === "idle"}
         recenterKey={recenterKey}
+        camera={camera}
+        pairs={pairs}
         onPeerClick={requestConnection}
       />
 
-      {!live && <EntryGate online={online} onReady={handleReady} />}
+      {!live && <EntryGate online={online} testPlace={testPlace} onReady={handleReady} />}
 
       {live && (
         <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
-          <div className="glass rise pointer-events-auto flex items-center gap-3 rounded-full py-2 pl-4 pr-4">
+          <div className="glass rise pointer-events-auto flex items-center gap-3 rounded-full py-1.5 pl-4 pr-1.5">
             <span className="text-base font-semibold tracking-tight text-moon">pulse</span>
             <span className="h-4 w-px bg-hairline" aria-hidden="true" />
-            <span className="flex items-center gap-2 text-sm text-mist" aria-live="polite">
+            <button
+              onClick={showEveryone}
+              title="Show everyone who's online"
+              className="flex h-8 items-center gap-2 rounded-full px-2.5 text-sm text-mist transition hover:bg-white/10 hover:text-moon"
+              aria-live="polite"
+            >
               <span className="h-1.5 w-1.5 rounded-full bg-amber shadow-[0_0_8px_2px_rgba(255,180,92,0.7)]" />
               {peers.length + 1} online
-            </span>
+            </button>
           </div>
-          <button
-            onClick={() => setRecenterKey((k) => k + 1)}
-            aria-label="Back to my light"
-            title="Back to my light"
-            className={`glass rise pointer-events-auto grid h-11 w-11 place-items-center rounded-full text-aurora transition hover:bg-white/10 ${inChat ? "sm:mr-[396px]" : ""}`}
-          >
-            <LocateIcon />
-          </button>
+          <div className={`rise flex items-start gap-2 ${inChat ? "sm:mr-[396px]" : ""}`}>
+            <SearchBox onPick={(p) => flyTo(p.lng, p.lat, p.zoom)} />
+            {peers.length > 0 && (
+              <button
+                onClick={nextLight}
+                aria-label="Go to the next light"
+                title="Go to the next light"
+                className="glass pointer-events-auto grid h-11 w-11 place-items-center rounded-full text-amber transition hover:bg-white/10"
+              >
+                <NextIcon />
+              </button>
+            )}
+            <button
+              onClick={() => setRecenterKey((k) => k + 1)}
+              aria-label="Back to my light"
+              title="Back to my light"
+              className="glass pointer-events-auto grid h-11 w-11 place-items-center rounded-full text-aurora transition hover:bg-white/10"
+            >
+              <LocateIcon />
+            </button>
+          </div>
         </header>
       )}
 
@@ -531,6 +616,7 @@ export default function Home() {
           timeoutMs={REQUEST_TIMEOUT_MS}
           onAccept={acceptIncoming}
           onDecline={declineIncoming}
+          onBlock={() => blockPeer(conn.peerId)}
         />
       )}
 
@@ -545,6 +631,7 @@ export default function Home() {
             addMessage(true, text);
           }}
           onStartVideo={startVideoRequest}
+          onBlock={() => blockPeer(conn.peerId)}
           onEnd={endConnection}
         />
       )}
@@ -572,6 +659,9 @@ export default function Home() {
         <VideoPanel
           localStream={localStream}
           remoteStream={remoteStream}
+          theyRevealed={theyRevealed}
+          onReveal={() => peerRef.current?.sendControl("video-revealed")}
+          onBlock={() => activePeerId && blockPeer(activePeerId)}
           onToggleMic={(on) => peerRef.current?.setMicEnabled(on)}
           onToggleCamera={(on) => peerRef.current?.setCameraEnabled(on)}
           onEnd={endVideo}

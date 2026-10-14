@@ -13,6 +13,7 @@ export default function ConnectionPrompt({
   timeoutMs,
   onAccept,
   onDecline,
+  onBlock,
 }: {
   title: string;
   subtitle?: string;
@@ -21,6 +22,7 @@ export default function ConnectionPrompt({
   timeoutMs?: number; // shows a draining bar when the request will expire
   onAccept: () => void;
   onDecline: () => void;
+  onBlock?: () => void; // "don't let this person ask again"
 }) {
   const acceptRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -71,6 +73,15 @@ export default function ConnectionPrompt({
             {acceptLabel}
           </button>
         </div>
+
+        {onBlock && (
+          <button
+            onClick={onBlock}
+            className="mx-auto mt-3 block rounded-full px-3 py-1 text-xs text-mist underline-offset-2 transition hover:text-signal hover:underline"
+          >
+            Decline and block
+          </button>
+        )}
 
         {timeoutMs ? (
           <span

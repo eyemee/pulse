@@ -3,7 +3,10 @@ export type PeerControl =
   | "video-request"
   | "video-accept"
   | "video-decline"
-  | "video-end";
+  | "video-end"
+  // Sent when you tap "Reveal" on their (blurred) video, so they know you
+  // can now see them.
+  | "video-revealed";
 
 interface PeerCallbacks {
   onSignal: (type: DescType, payload: string) => void;

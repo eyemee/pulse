@@ -75,3 +75,31 @@ export const LinkIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
   </Base>
 );
+
+export const SearchIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Base {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m16 16 4.5 4.5" />
+  </Base>
+);
+
+export const NextIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Base {...p}>
+    <circle cx="6" cy="12" r="2" />
+    <path d="M10 12h9M15 8l4 4-4 4" />
+  </Base>
+);
+
+export const BlockIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Base {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="m6 6 12 12" />
+  </Base>
+);
+
+export const EyeIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Base {...p}>
+    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+    <circle cx="12" cy="12" r="3" />
+  </Base>
+);

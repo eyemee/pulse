@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MAX_CHAT_CHARS } from "@/lib/webrtc";
-import { SendIcon, VideoIcon } from "./icons";
+import { BlockIcon, SendIcon, VideoIcon } from "./icons";
 
 export interface ChatMessage {
   id: number;
@@ -19,6 +19,7 @@ export default function ChatPanel({
   distanceLabel,
   onSend,
   onStartVideo,
+  onBlock,
   onEnd,
 }: {
   messages: ChatMessage[];
@@ -27,6 +28,7 @@ export default function ChatPanel({
   distanceLabel: string | null;
   onSend: (text: string) => void;
   onStartVideo: () => void;
+  onBlock: () => void;
   onEnd: () => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -52,9 +54,9 @@ export default function ChatPanel({
   return (
     <aside
       aria-label="Chat with stranger"
-      className="glass slide-in absolute inset-x-0 bottom-0 z-30 flex h-[70dvh] flex-col rounded-t-3xl shadow-[0_-20px_60px_rgba(0,0,0,0.45)] sm:inset-x-auto sm:inset-y-4 sm:right-4 sm:h-auto sm:w-[380px] sm:rounded-3xl"
+      className="glass-solid slide-in absolute inset-x-0 bottom-0 z-30 flex h-[70dvh] flex-col rounded-t-3xl shadow-[0_-20px_60px_rgba(0,0,0,0.45)] sm:inset-x-auto sm:inset-y-4 sm:right-4 sm:h-auto sm:w-[380px] sm:rounded-3xl"
     >
-      <header className="flex items-center gap-3 border-b border-hairline px-5 py-4">
+      <header className="flex items-center gap-2 border-b border-hairline py-4 pl-4 pr-3">
         <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/5">
           <span className="pulse-dot pointer-events-none" data-active="true" aria-hidden="true" />
         </span>
@@ -63,7 +65,7 @@ export default function ChatPanel({
           <p className={`text-xs ${connected ? "text-aurora" : "text-mist"}`}>
             {connected ? "Connected" : "Connecting…"}
           </p>
-          {distanceLabel && <p className="truncate text-xs text-mist">{distanceLabel}</p>}
+          {distanceLabel && <p className="text-xs leading-snug text-mist">{distanceLabel}</p>}
         </div>
         <button
           onClick={onStartVideo}
@@ -75,8 +77,16 @@ export default function ChatPanel({
           <VideoIcon />
         </button>
         <button
+          onClick={onBlock}
+          aria-label="Block this person"
+          title="Block: ends the chat and you won't see each other again"
+          className="grid h-10 w-10 place-items-center rounded-full border border-hairline text-mist transition hover:border-signal/40 hover:text-signal"
+        >
+          <BlockIcon />
+        </button>
+        <button
           onClick={onEnd}
-          className="h-10 rounded-full border border-signal/40 px-4 text-sm font-medium text-signal transition hover:bg-signal/10"
+          className="h-10 shrink-0 rounded-full border border-signal/40 px-3.5 text-sm font-medium text-signal transition hover:bg-signal/10"
         >
           End chat
         </button>
