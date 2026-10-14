@@ -83,3 +83,13 @@ export function leave(secret: string): void {
     });
   }
 }
+
+// Block someone for the rest of this session (see /api/block).
+export async function block(secret: string, targetId: string): Promise<boolean> {
+  try {
+    const res = await post("/api/block", { secret, targetId });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

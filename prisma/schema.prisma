@@ -47,3 +47,16 @@ model RateLimit {
 
   @@index([windowStart])
 }
+
+model Block {
+  // "blocker doesn't want to hear from blocked." Enforced both ways: neither
+  // sees the other on the map and requests between them are refused. Rows
+  // only live as long as both sessions do (swept by /api/poll and /api/leave),
+  // since public ids are per-session anyway.
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+}

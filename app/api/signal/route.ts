@@ -95,11 +95,20 @@ export async function POST(request: Request) {
   switch (signalType) {
     case "request": {
       if (me.busy) return reject("already in a connection");
-      const target = await prisma.presence.findUnique({
-        where: { id: toId },
-        select: { busy: true },
-      });
-      if (!target || target.busy) {
+      const [target, blocked] = await Promise.all([
+        prisma.presence.findUnique({ where: { id: toId }, select: { busy: true } }),
+        prisma.block.findFirst({
+          where: {
+            OR: [
+              { blockerId: toId, blockedId: fromId },
+              { blockerId: fromId, blockedId: toId },
+            ],
+          },
+          select: { blockerId: true },
+        }),
+      ]);
+      // Blocked either way: indistinguishable from "they're unavailable".
+      if (!target || target.busy || blocked) {
         // Offline or in another chat: auto-decline instead of delivering.
         await sendDecline(toId, fromId);
         return Response.json({ ok: true, autoDeclined: true });

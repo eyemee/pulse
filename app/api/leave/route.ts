@@ -20,6 +20,9 @@ export async function POST(request: Request) {
     where: { OR: [{ toId: id }, { fromId: id }] },
   });
   await prisma.presence.deleteMany({ where: { id } });
+  await prisma.block.deleteMany({
+    where: { OR: [{ blockerId: id }, { blockedId: id }] },
+  });
   // Free whoever was requesting / talking to us, so they don't stay busy.
   await prisma.presence.updateMany({
     where: { peerId: id },

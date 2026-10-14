@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   if (!present) {
     // Not joined (or reaped): nothing to see until /api/join succeeds. This
     // also stops unjoined callers from scraping everyone's positions.
-    const empty: PollResponse = { present: false, peers: [], signals: [] };
+    const empty: PollResponse = { present: false, peers: [], pairs: [], signals: [] };
     return Response.json(empty);
   }
 
@@ -73,14 +73,19 @@ export async function POST(request: Request) {
           prisma.rateLimit.deleteMany({
             where: { windowStart: { lt: new Date(now - 10 * 60_000) } },
           }),
+          // Blocks only matter while both sessions exist.
+          prisma.$executeRaw`
+            DELETE FROM "Block" b
+            WHERE NOT EXISTS (SELECT 1 FROM "Presence" p WHERE p."id" = b."blockerId")
+               OR NOT EXISTS (SELECT 1 FROM "Presence" p WHERE p."id" = b."blockedId")`,
         ]).catch((err) => console.warn("[pulse] poll housekeeping failed:", err))
       : Promise.resolve();
 
-  const [peers, inbox] = await Promise.all([
+  const [rows, inbox, blocks] = await Promise.all([
     // Online peers, excluding self.
     prisma.presence.findMany({
       where: { id: { not: id }, lastSeen: { gte: staleCutoff } },
-      select: { id: true, lat: true, lng: true, busy: true },
+      select: { id: true, lat: true, lng: true, busy: true, peerId: true },
     }),
     // Drain this user's mailbox in one atomic statement: DELETE ... RETURNING
     // hands back exactly the rows it removed, so a signal inserted meanwhile
@@ -88,12 +93,31 @@ export async function POST(request: Request) {
     prisma.$queryRaw<InboxRow[]>`
       DELETE FROM "Signal" WHERE "toId" = ${id}
       RETURNING "id", "fromId", "toId", "type", "payload", "createdAt"`,
+    // Anyone this user blocked, or who blocked this user: hidden both ways.
+    prisma.block.findMany({
+      where: { OR: [{ blockerId: id }, { blockedId: id }] },
+      select: { blockerId: true, blockedId: true },
+    }),
     housekeeping,
   ]);
+  const hidden = new Set(blocks.map((b) => (b.blockerId === id ? b.blockedId : b.blockerId)));
+  const peers = rows.filter((p) => !hidden.has(p.id));
+
+  // Other people's live conversations, as id pairs, so every map can draw
+  // them. Only mutual, accepted connections (both busy and pointing at each
+  // other); pending requests stay private. peerId itself is never sent.
+  const visible = new Map(peers.map((p) => [p.id, p]));
+  const pairs: [string, string][] = [];
+  for (const p of peers) {
+    if (!p.busy || !p.peerId || p.id > p.peerId) continue; // each pair once
+    const other = visible.get(p.peerId);
+    if (other && other.busy && other.peerId === p.id) pairs.push([p.id, other.id]);
+  }
   inbox.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   const response: PollResponse = {
     present,
+    pairs,
     peers: peers.map((p) => ({
       id: p.id,
       lat: p.lat,
