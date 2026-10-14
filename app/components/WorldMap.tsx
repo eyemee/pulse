@@ -137,6 +137,11 @@ export default function WorldMap({
             .setLngLat([peer.lng, peer.lat])
             .addTo(map);
           markers.set(peer.id, marker);
+        } else {
+          const at = marker.getLngLat();
+          if (at.lng !== peer.lng || at.lat !== peer.lat) {
+            marker.setLngLat([peer.lng, peer.lat]);
+          }
         }
         marker.getElement().style.opacity = peer.busy ? "0.35" : "1";
       }

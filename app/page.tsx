@@ -33,6 +33,8 @@ export default function Home() {
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(
     null,
   );
+  // Raw location kept in memory only, so we can re-join if we get reaped.
+  const myLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const [conn, _setConn] = useState<Conn>({ kind: "idle" });
   const connRef = useRef<Conn>(conn);
@@ -313,6 +315,10 @@ export default function Home() {
       try {
         const data = await poll(sessionId);
         if (!active) return;
+        if (!data.present && myLocationRef.current) {
+          const { lat, lng } = myLocationRef.current;
+          await join(sessionId, lat, lng);
+        }
         setPeers(data.peers);
         for (const s of data.signals) processSignalRef.current(s);
         checkPeerPresentRef.current(data.peers);
@@ -340,6 +346,7 @@ export default function Home() {
 
   async function handleReady(lat: number, lng: number) {
     setMyLocation({ lat, lng });
+    myLocationRef.current = { lat, lng };
     await join(sessionId, lat, lng);
     setPhase("live");
   }

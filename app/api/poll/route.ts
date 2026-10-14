@@ -24,10 +24,14 @@ export async function GET(request: NextRequest) {
   // 1) Heartbeat — refresh lastSeen for the caller only. This used to have an
   // empty `where`, which refreshed every row on every poll, so nobody ever
   // went stale and closed tabs stayed on the map while anyone was online.
-  await prisma.presence.updateMany({
+  const heartbeat = await prisma.presence.updateMany({
     where: { id },
     data: { lastSeen: new Date(now) },
   });
+  // No row means we were reaped (tab throttled in the background, laptop
+  // slept, DB restarted). Tell the client so it can re-join instead of
+  // silently staying invisible to everyone else.
+  const present = heartbeat.count > 0;
 
   // 2) Reap stale presence rows and orphaned signals (independent deletes —
   // no atomicity needed, and avoids transactions over a PgBouncer pooler).
@@ -56,6 +60,7 @@ export async function GET(request: NextRequest) {
   }
 
   const response: PollResponse = {
+    present,
     peers: peers.map((p) => ({
       id: p.id,
       lat: p.lat,
