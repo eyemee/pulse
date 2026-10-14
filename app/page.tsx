@@ -51,6 +51,8 @@ export default function Home() {
   const peerRef = useRef<PeerSession | null>(null);
   const msgId = useRef(0);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Consecutive polls in which our current peer was missing from presence.
+  const missingPolls = useRef(0);
 
   function showNotice(text: string) {
     setNotice(text);
@@ -61,8 +63,13 @@ export default function Home() {
     setMessages((prev) => [...prev, { id: msgId.current++, mine, text }]);
   }
 
-  function teardown(message?: string) {
+  // `notifyPeerId`: send an "end" so the server frees our busy flag. Needed
+  // when the other side vanished without hanging up (closed tab, network
+  // drop), otherwise we stay "busy" and nobody can request us again.
+  function teardown(message?: string, notifyPeerId?: string) {
     if (requestTimer.current) clearTimeout(requestTimer.current);
+    if (notifyPeerId) void sendSignal(sessionId, notifyPeerId, "end");
+    missingPolls.current = 0;
     peerRef.current?.close();
     peerRef.current = null;
     setLocalStream(null);
@@ -82,12 +89,15 @@ export default function Home() {
       onControl: (ctrl) => handleControl(ctrl),
       onRemoteStream: (stream) => setRemoteStream(stream),
       onConnectionState: (state) => {
-        if (state === "failed") {
-          teardown("Connection failed (network).");
+        if (state === "failed" && peerRef.current === ps) {
+          teardown("Lost the connection to the stranger.", peerId);
         }
       },
       onChannelOpen: () => {
         setConn({ kind: "connected", peerId });
+      },
+      onChannelClose: () => {
+        if (peerRef.current === ps) teardown("Stranger disconnected.", peerId);
       },
     });
     peerRef.current = ps;
@@ -265,9 +275,33 @@ export default function Home() {
     }
   }
 
+  // Backstop for a peer that disappeared without an "end" (tab closed, the
+  // beacon lost, laptop slept). Their presence row is reaped after STALE_MS;
+  // two missed polls in a row avoids reacting to a single slow request.
+  function checkPeerPresent(peers: PeerDot[]) {
+    const c = connRef.current;
+    if (c.kind === "idle") return;
+    if (peers.some((p) => p.id === c.peerId)) {
+      missingPolls.current = 0;
+      return;
+    }
+    missingPolls.current += 1;
+    if (missingPolls.current < 2) return;
+    if (c.kind === "incoming") {
+      missingPolls.current = 0;
+      setConn({ kind: "idle" });
+    } else if (c.kind === "requesting") {
+      teardown("They left before answering.", c.peerId);
+    } else {
+      teardown("Stranger disconnected.", c.peerId);
+    }
+  }
+
   const processSignalRef = useRef(processSignal);
+  const checkPeerPresentRef = useRef(checkPeerPresent);
   useEffect(() => {
     processSignalRef.current = processSignal;
+    checkPeerPresentRef.current = checkPeerPresent;
   });
 
   useEffect(() => {
@@ -281,6 +315,7 @@ export default function Home() {
         if (!active) return;
         setPeers(data.peers);
         for (const s of data.signals) processSignalRef.current(s);
+        checkPeerPresentRef.current(data.peers);
       } catch {}
       if (active) timer = setTimeout(tick, POLL_INTERVAL_MS);
     };
