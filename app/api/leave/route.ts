@@ -20,6 +20,11 @@ export async function POST(request: Request) {
     where: { OR: [{ toId: id }, { fromId: id }] },
   });
   await prisma.presence.deleteMany({ where: { id } });
+  // Free whoever was requesting / talking to us, so they don't stay busy.
+  await prisma.presence.updateMany({
+    where: { peerId: id },
+    data: { busy: false, peerId: null },
+  });
 
   return Response.json({ ok: true });
 }

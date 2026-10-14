@@ -42,8 +42,15 @@ export async function sendSignal(
   toId: string,
   type: SignalType,
   payload?: string,
-): Promise<void> {
-  await post("/api/signal", { secret, toId, type, payload });
+): Promise<boolean> {
+  // false when the server rejected it (e.g. the request was already
+  // cancelled) or the network failed.
+  try {
+    const res = await post("/api/signal", { secret, toId, type, payload });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 // Fire-and-forget leave that survives the tab closing.

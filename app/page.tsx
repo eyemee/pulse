@@ -171,8 +171,14 @@ export default function Home() {
     if (connRef.current.kind !== "incoming") return;
     const peerId = connRef.current.peerId;
     startPeer(peerId, false);
-    void sendSignal(secret, peerId, "accept");
     setConn({ kind: "connecting", peerId });
+    void sendSignal(secret, peerId, "accept").then((ok) => {
+      // Rejected when they cancelled or timed out just before we clicked.
+      const c = connRef.current;
+      if (!ok && c.kind === "connecting" && c.peerId === peerId) {
+        teardown("They're no longer waiting.");
+      }
+    });
   }
 
   function declineIncoming() {

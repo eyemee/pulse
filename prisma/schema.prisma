@@ -16,6 +16,10 @@ model Presence {
   lat      Float // ALREADY privacy-offset coords (raw is never stored)
   lng      Float
   busy     Boolean  @default(false) // true while in an active connection
+  // Who this user is dealing with: the person they requested (busy=false)
+  // or their active partner (busy=true). Lets the server reject signals
+  // that don't match a real connection.
+  peerId   String?
   lastSeen DateTime
 
   @@index([lastSeen])

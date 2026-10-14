@@ -18,8 +18,9 @@ const VALID_TYPES: SignalType[] = [
 const MAX_PAYLOAD = 64 * 1024; // SDP/ICE are small; cap to be safe.
 
 // POST /api/signal — body { secret, toId, type, payload? }
-// Drops one message into the recipient's mailbox. Also manages the `busy`
-// flag so a user can only be in one connection at a time.
+// Drops one message into the recipient's mailbox, if it fits the current
+// connection state. Also manages `busy` / `peerId` so a user can only be in
+// one connection at a time.
 export async function POST(request: Request) {
   const body = await readJson(request, MAX_PAYLOAD + 1024);
   if (!body) return Response.json({ error: "invalid body" }, { status: 400 });
@@ -48,44 +49,108 @@ export async function POST(request: Request) {
   const signalType = type as SignalType;
   const payloadStr = typeof payload === "string" ? payload : null;
 
-  // Enforce "one active connection at a time": if the target is already busy,
-  // auto-decline the request instead of delivering it.
-  if (signalType === "request") {
-    const target = await prisma.presence.findUnique({
-      where: { id: toId },
-      select: { busy: true },
-    });
-    if (!target) {
-      // Target went offline — tell the initiator it was declined.
-      await sendDecline(toId, fromId);
-      return Response.json({ ok: true, autoDeclined: true });
-    }
-    if (target.busy) {
-      await sendDecline(toId, fromId);
-      return Response.json({ ok: true, autoDeclined: true });
-    }
+  // SDP/ICE messages carry a JSON payload; control messages carry none.
+  const needsPayload =
+    signalType === "offer" || signalType === "answer" || signalType === "ice";
+  if (needsPayload !== (payloadStr !== null) || (payloadStr && !isJson(payloadStr))) {
+    return Response.json({ error: "invalid payload" }, { status: 400 });
   }
 
-  // Busy transitions:
-  // - accept: the connection is now active → mark BOTH peers busy.
-  // - decline/end: free both peers.
-  if (signalType === "accept") {
-    await prisma.presence.updateMany({
-      where: { id: { in: [fromId, toId] } },
-      data: { busy: true },
-    });
-  } else if (signalType === "decline" || signalType === "end") {
-    await prisma.presence.updateMany({
-      where: { id: { in: [fromId, toId] } },
-      data: { busy: false },
-    });
-  }
-
-  await prisma.signal.create({
-    data: { fromId, toId, type: signalType, payload: payloadStr },
+  const me = await prisma.presence.findUnique({
+    where: { id: fromId },
+    select: { busy: true, peerId: true },
   });
+  if (!me) return Response.json({ error: "not joined" }, { status: 401 });
+
+  const deliver = () =>
+    prisma.signal.create({
+      data: { fromId, toId, type: signalType, payload: payloadStr },
+    });
+  const reject = (error: string) => Response.json({ error }, { status: 409 });
+
+  // Server-side state machine. Previously any signal was relayed to anyone,
+  // so e.g. a forged "accept" could mark any stranger busy (unreachable), and
+  // offers could be pushed at people who never agreed to connect.
+  //
+  //   request: me -> target       me.peerId = target          (not busy)
+  //   accept:  target -> me       only if requester.peerId == me, both busy
+  //   offer/answer/ice            only between the two busy partners
+  //   decline / end               only clear rows that point at each other
+  switch (signalType) {
+    case "request": {
+      if (me.busy) return reject("already in a connection");
+      const target = await prisma.presence.findUnique({
+        where: { id: toId },
+        select: { busy: true },
+      });
+      if (!target || target.busy) {
+        // Offline or in another chat: auto-decline instead of delivering.
+        await sendDecline(toId, fromId);
+        return Response.json({ ok: true, autoDeclined: true });
+      }
+      await prisma.presence.update({ where: { id: fromId }, data: { peerId: toId } });
+      await deliver();
+      break;
+    }
+    case "accept": {
+      if (me.busy) return reject("already in a connection");
+      // Claim the requester only if they really asked for us and are still
+      // waiting. Conditional update so two accepts can't both win.
+      const claimed = await prisma.presence.updateMany({
+        where: { id: toId, peerId: fromId, busy: false },
+        data: { busy: true },
+      });
+      if (claimed.count === 0) return reject("no pending request from this user");
+      await prisma.presence.update({
+        where: { id: fromId },
+        data: { busy: true, peerId: toId },
+      });
+      await deliver();
+      break;
+    }
+    case "decline": {
+      const cleared = await prisma.presence.updateMany({
+        where: { id: toId, peerId: fromId, busy: false },
+        data: { peerId: null },
+      });
+      if (cleared.count === 0) return reject("no pending request from this user");
+      await deliver();
+      break;
+    }
+    case "offer":
+    case "answer":
+    case "ice": {
+      if (!me.busy || me.peerId !== toId) return reject("not connected to this user");
+      await deliver();
+      break;
+    }
+    case "end": {
+      // Always free yourself; only touch / notify the other side if one of
+      // you was actually dealing with the other.
+      const wasMine = me.peerId === toId;
+      await prisma.presence.update({
+        where: { id: fromId },
+        data: { busy: false, peerId: null },
+      });
+      const theirs = await prisma.presence.updateMany({
+        where: { id: toId, peerId: fromId },
+        data: { busy: false, peerId: null },
+      });
+      if (wasMine || theirs.count > 0) await deliver();
+      break;
+    }
+  }
 
   return Response.json({ ok: true });
+}
+
+function isJson(s: string): boolean {
+  try {
+    JSON.parse(s);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Helper: deliver an auto-decline from `target` back to `initiator`.
