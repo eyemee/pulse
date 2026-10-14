@@ -9,6 +9,7 @@ import VideoPanel from "./components/VideoPanel";
 import { join, leave, poll, sendSignal } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
+import { startTicker } from "@/lib/ticker";
 import { type PeerDot, type SignalMsg } from "@/lib/types";
 
 type Conn =
@@ -309,9 +310,12 @@ export default function Home() {
   useEffect(() => {
     if (phase !== "live" || !sessionId) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
 
     const tick = async () => {
+      // A slow poll must not overlap the next one (ordering of signals).
+      if (inFlight) return;
+      inFlight = true;
       try {
         const data = await poll(sessionId);
         if (!active) return;
@@ -322,16 +326,42 @@ export default function Home() {
         setPeers(data.peers);
         for (const s of data.signals) processSignalRef.current(s);
         checkPeerPresentRef.current(data.peers);
-      } catch {}
-      if (active) timer = setTimeout(tick, POLL_INTERVAL_MS);
+      } catch {
+      } finally {
+        inFlight = false;
+      }
     };
-    tick();
+    void tick();
+    // Worker-driven so a hidden tab keeps heartbeating (see lib/ticker.ts).
+    const stop = startTicker(POLL_INTERVAL_MS, () => void tick());
+    // Catch up immediately when the tab comes back to the foreground.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       active = false;
-      if (timer) clearTimeout(timer);
+      stop();
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [phase, sessionId]);
+
+  // If a request arrives while the tab is in the background, say so in the
+  // tab title; the prompt itself is invisible until they switch back.
+  useEffect(() => {
+    if (conn.kind !== "incoming") return;
+    const original = document.title;
+    let on = false;
+    const id = window.setInterval(() => {
+      on = !on;
+      document.title = on ? "● Someone wants to connect" : original;
+    }, 1000);
+    return () => {
+      window.clearInterval(id);
+      document.title = original;
+    };
+  }, [conn.kind]);
 
   useEffect(() => {
     if (!sessionId || phase !== "live") return;
