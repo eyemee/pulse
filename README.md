@@ -1,5 +1,15 @@
 # Pulse — Take-Home Assessment
 
+> **Submission notes (for reviewers)**
+>
+> - Live app: _Vercel URL added at deploy time_
+> - Write-up: [NOTES.md](NOTES.md), one section per phase.
+> - Testing alone: open `/?at=Tokyo` in one window and `/?at=Paris` in another
+>   (a private window, or a second browser). Each joins near that place without a
+>   location prompt, so you don't need DevTools Sensors. `?at=35.68,139.69` also works.
+> - Running locally after pulling: `npx prisma db push` then `npx prisma generate`
+>   (Phase 4 adds a `Block` table).
+
 Welcome, and thanks for taking the time. **Pulse** is a working (mostly!) Next.js
 app: a living globe of anonymous strangers — every online user is a dot on a world
 map; tap one to connect for text chat or a video call. No accounts, no history,

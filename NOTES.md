@@ -65,8 +65,28 @@ I went through the four routes with curl and tried to break them as a second, ho
 7. **Validation.** Strict id and secret formats, a JSON payload required only for SDP/ICE, request body size caps, and chat capped at 2000 characters on both sides (it's peer-to-peer, so the server can't police it). I also removed a leftover ngrok host from the dev config.
 8. **Mapbox token.** Public tokens are visible in the page by design. The fix is a URL restriction in the Mapbox dashboard (Vercel domain + localhost), done at deploy time.
 
-Checked and fine: SQL injection (Prisma parameterises, and the one raw query uses a tagged template), XSS (React escapes chat text), CSRF (no cookies; the secret is in the body).
+Checked and fine: SQL injection (Prisma parameterises, and the raw queries use tagged templates, which are parameterised too), XSS (React escapes chat text), CSRF (no cookies; the secret is in the body).
 
 Next, with more time: TURN relay-only, a full CSP, and block/report so people can protect themselves (which is where Phase 4 comes in).
 
 ## Phase 4: Make it better
+
+The brief asked for "alive and/or safe". I did both, because on a site that connects strangers the two pull on each other: the more you can see happening, the more you need a way out of a bad connection.
+
+**What I built**
+
+1. **Live arcs: see conversations happen.** When two people connect, an arc of light draws between their dots for everyone on the globe, and both dots spark. Your own call gets a dashed arc while it's ringing and a solid one once you're connected. Before this, the map looked the same whether people were talking or not. Now you can watch the world talk, which is the best argument for joining in. The server sends pairs as two public ids. It never sends `peerId` itself, and pairs only appear once both sides agree (`busy` on both and pointing at each other), so a pending or forged request never draws an arc.
+2. **Blur until you reveal.** When video starts, the other person's picture is heavily blurred until you tap "Reveal video". They see a chip saying whether you've revealed them yet. Video with a stranger is the riskiest moment in the app, and this means nothing lands on your screen before you decide to look. It costs one tap for people who were going to look anyway.
+3. **Block.** From the chat, the video call, or straight from an incoming request ("Decline and block"). Blocking ends the call, hides each of you from the other's map, and the server refuses any further requests between you (checked in `/api/signal`, not just hidden in the UI). Blocks are stored in a `Block` table and deleted when either person leaves, because there are no accounts to keep them against.
+4. **Finding people.** Testing showed the globe was hard to navigate. You now get place search (Mapbox geocoding), a "Next light" button that flies to the nearest available person, and a tap on the online count fits everyone in view.
+5. **Testing from one machine.** Visiting `/?at=Tokyo` (or `/?at=35.68,139.69`) joins near that place without asking for location, so one person can play several users in different windows. The entry screen says when this is on.
+
+**Trade-offs**
+
+- Arcs show *who* is talking to *whom* among anonymous lights. The dots are already offset by 1–3 km and carry no identity, so I judged that fine, but it's a real reveal and the first thing I'd ask a privacy reviewer about.
+- `?at=` lets anyone choose where they appear. That was already true through DevTools Sensors, so it doesn't open anything new; it just makes testing easier. In production I'd put it behind a flag.
+- Blocks only last a session, since a new tab gets a new identity. Without accounts, that's the honest limit. A determined person can come back, but they can't keep pestering the same session.
+- Blur happens on the receiving side, so it protects the viewer, not the sender. Someone could in theory read the raw stream with their own code. Protecting the sender would mean not sending until revealed, which adds a renegotiation round trip; I chose the instant version.
+
+**Next, with more time:** report-to-moderator alongside block (needs somewhere for reports to go), a short arc trail when a conversation ends so the globe shows recent activity, and opt-in interest tags shown on hover so connections aren't fully random.
+
