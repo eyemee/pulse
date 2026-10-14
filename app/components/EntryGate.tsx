@@ -5,7 +5,7 @@ import { useState } from "react";
 export default function EntryGate({
   onReady,
 }: {
-  onReady: (lat: number, lng: number) => void;
+  onReady: (lat: number, lng: number) => Promise<void> | void;
 }) {
   const [status, setStatus] = useState<"idle" | "locating" | "error">("idle");
   const [error, setError] = useState<string>("");
@@ -18,7 +18,12 @@ export default function EntryGate({
     }
     setStatus("locating");
     navigator.geolocation.getCurrentPosition(
-      (pos) => onReady(pos.coords.latitude, pos.coords.longitude),
+      (pos) => {
+        Promise.resolve(onReady(pos.coords.latitude, pos.coords.longitude)).catch(() => {
+          setStatus("error");
+          setError("Couldn't connect to Pulse right now. Please try again.");
+        });
+      },
       (err) => {
         setStatus("error");
         setError(

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isValidPeerId, isValidSecret, publicIdFromSecret, readJson } from "@/lib/session";
 import type { SignalType } from "@/lib/types";
+import { allowAll, clientIp, tooMany, type Limit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,6 +56,21 @@ export async function POST(request: Request) {
   if (needsPayload !== (payloadStr !== null) || (payloadStr && !isJson(payloadStr))) {
     return Response.json({ error: "invalid payload" }, { status: 400 });
   }
+
+  // A call setup is a few dozen signals (ICE trickle); video renegotiation
+  // adds more. Requests get much tighter limits: they're what lands on a
+  // stranger's screen, so they're the harassment vector.
+  const limits: Limit[] = [
+    { key: `sig:id:${fromId}`, max: 300, windowSec: 60 },
+    { key: `sig:ip:${clientIp(request)}`, max: 600, windowSec: 60 },
+  ];
+  if (signalType === "request") {
+    limits.push(
+      { key: `req:id:${fromId}`, max: 10, windowSec: 60 },
+      { key: `req:pair:${fromId}:${toId}`, max: 3, windowSec: 120 },
+    );
+  }
+  if (!(await allowAll(limits))) return tooMany(signalType === "request" ? 60 : 10);
 
   const me = await prisma.presence.findUnique({
     where: { id: fromId },

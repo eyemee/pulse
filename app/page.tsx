@@ -148,7 +148,13 @@ export default function Home() {
   function requestConnection(peerId: string) {
     if (connRef.current.kind !== "idle") return;
     setConn({ kind: "requesting", peerId });
-    void sendSignal(secret, peerId, "request");
+    void sendSignal(secret, peerId, "request").then((ok) => {
+      // Rate-limited (too many requests) or rejected by the server.
+      const c = connRef.current;
+      if (!ok && c.kind === "requesting" && c.peerId === peerId) {
+        teardown("Couldn't send the request. Try again in a moment.");
+      }
+    });
     requestTimer.current = setTimeout(() => {
       if (
         connRef.current.kind === "requesting" &&

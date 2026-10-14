@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { applyPrivacyOffset, isValidLatLng } from "@/lib/geo";
 import { isValidSecret, offsetSeed, publicIdFromSecret, readJson } from "@/lib/session";
+import { allowAll, clientIp, tooMany } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,16 @@ export async function POST(request: Request) {
   }
 
   const id = publicIdFromSecret(secret);
+
+  // Normal use is one join per tab (plus a rare re-join). Caps scripted
+  // floods of fake dots.
+  const ip = clientIp(request);
+  if (!(await allowAll([
+    { key: `join:ip:${ip}`, max: 30, windowSec: 60 },
+    { key: `join:id:${id}`, max: 10, windowSec: 60 },
+  ]))) {
+    return tooMany(60);
+  }
   const offset = applyPrivacyOffset(lat as number, lng as number, offsetSeed(secret));
 
   await prisma.presence.upsert({

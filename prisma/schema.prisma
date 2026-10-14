@@ -36,3 +36,14 @@ model Signal {
 
   @@index([toId])
 }
+
+model RateLimit {
+  // Fixed-window counters for abuse limits, e.g. "req:<id>" or "join:<ip>".
+  // Kept in Postgres so limits hold across serverless instances. Old rows
+  // are swept by /api/poll.
+  key         String   @id
+  windowStart DateTime
+  count       Int
+
+  @@index([windowStart])
+}

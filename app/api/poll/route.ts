@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { STALE_MS, SIGNAL_TTL_MS } from "@/lib/presence";
 import { isValidSecret, publicIdFromSecret, readJson } from "@/lib/session";
 import type { PollResponse } from "@/lib/types";
+import { allow, tooMany } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid session" }, { status: 400 });
   }
   const id = publicIdFromSecret(body.secret);
+
+  // The client polls every 1.5s (~40/min). Anything far above that is a
+  // script hammering the database.
+  if (!(await allow({ key: `poll:${id}`, max: 120, windowSec: 60 }))) {
+    return tooMany(5);
+  }
 
   const now = Date.now();
   const staleCutoff = new Date(now - STALE_MS);
@@ -42,8 +49,16 @@ export async function POST(request: Request) {
 
   // 2) Reap stale presence rows and orphaned signals (independent deletes —
   // no atomicity needed, and avoids transactions over a PgBouncer pooler).
-  await prisma.presence.deleteMany({ where: { lastSeen: { lt: staleCutoff } } });
-  await prisma.signal.deleteMany({ where: { createdAt: { lt: signalCutoff } } });
+  // Housekeeping doesn't need to run on every poll from every client; the
+  // peer query below filters stale rows anyway. ~1 in 4 polls is plenty
+  // and cuts three writes from most requests.
+  if (Math.random() < 0.25) {
+    await prisma.presence.deleteMany({ where: { lastSeen: { lt: staleCutoff } } });
+    await prisma.signal.deleteMany({ where: { createdAt: { lt: signalCutoff } } });
+    await prisma.rateLimit.deleteMany({
+      where: { windowStart: { lt: new Date(now - 10 * 60_000) } },
+    });
+  }
 
   // 3) Online peers, excluding self.
   const peers = await prisma.presence.findMany({
