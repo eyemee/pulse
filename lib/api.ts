@@ -23,12 +23,28 @@ function post(path: string, body: unknown, init?: RequestInit) {
   });
 }
 
-// Returns this session's public id.
-export async function join(secret: string, lat: number, lng: number): Promise<string> {
+export interface JoinResult {
+  id: string; // public id
+  lat: number; // public (privacy-offset) position
+  lng: number;
+}
+
+export async function join(secret: string, lat: number, lng: number): Promise<JoinResult> {
   const res = await post("/api/join", { secret, lat, lng });
   if (!res.ok) throw new Error(`join failed: ${res.status}`);
-  const data = (await res.json()) as { id: string };
-  return data.id;
+  return (await res.json()) as JoinResult;
+}
+
+// How many people are on right now (no positions). For the entry screen.
+export async function onlineCount(): Promise<number | null> {
+  try {
+    const res = await fetch("/api/count", { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { online: number };
+    return data.online;
+  } catch {
+    return null;
+  }
 }
 
 export async function poll(secret: string): Promise<PollResponse> {

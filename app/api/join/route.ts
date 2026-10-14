@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
 // POST /api/join — body { secret, lat, lng } (raw coords).
 // Derives the public id from the private secret, applies a 1–3 km privacy
 // offset (stable for this session) and upserts the presence row. Raw
-// coordinates are never stored. Returns { id } — the caller's public id.
+// coordinates are never stored. Returns { id, lat, lng }: the caller's
+// public id and public (offset) position.
 export async function POST(request: Request) {
   const body = await readJson(request);
   if (!body) return Response.json({ error: "invalid body" }, { status: 400 });
@@ -41,5 +42,7 @@ export async function POST(request: Request) {
     update: { lat: offset.lat, lng: offset.lng, lastSeen: new Date() },
   });
 
-  return Response.json({ id });
+  // Where everyone else sees this user. Lets the client draw "you" at the
+  // same spot instead of at the raw location (which it never displays).
+  return Response.json({ id, lat: offset.lat, lng: offset.lng });
 }
