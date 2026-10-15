@@ -75,7 +75,7 @@ I went through the four routes with curl and tried to break them as a second, ho
 
 Checked and fine: SQL injection (Prisma parameterises, and the raw queries use tagged templates, which are parameterised too), XSS (React escapes chat text), CSRF (no cookies; the secret is in the body).
 
-Next, with more time: a full CSP, and block/report so people can protect themselves (which is where Phase 4 comes in).
+Next, with more time: a full CSP, and report-to-moderator next to block (block itself shipped in Phase 4).
 
 ## Phase 4: Make it better
 
