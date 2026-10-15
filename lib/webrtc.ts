@@ -1,3 +1,5 @@
+import { sanitizeCandidate } from "@/lib/ice";
+
 export type DescType = "offer" | "answer" | "ice";
 export type PeerControl =
   | "video-request"
@@ -23,9 +25,13 @@ interface PeerCallbacks {
 export const MAX_CHAT_CHARS = 2000;
 const MAX_DC_MESSAGE_BYTES = 16 * 1024;
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-};
+// What /api/ice hands out for one connection.
+export interface IceConfig {
+  iceServers: RTCIceServer[];
+  // true: TURN relay only. Neither side ever learns the other's IP; each sees
+  // only the relay's address. false when TURN isn't configured (STUN only).
+  relayOnly: boolean;
+}
 
 export class PeerSession {
   private pc: RTCPeerConnection;
@@ -38,15 +44,25 @@ export class PeerSession {
   private readonly cb: PeerCallbacks;
   private pendingCandidates: RTCIceCandidateInit[] = [];
 
-  constructor(initiator: boolean, cb: PeerCallbacks) {
+  constructor(initiator: boolean, ice: IceConfig, cb: PeerCallbacks) {
     this.cb = cb;
     this.polite = !initiator;
-    this.pc = new RTCPeerConnection(ICE_CONFIG);
+    this.pc = new RTCPeerConnection({
+      iceServers: ice.iceServers,
+      iceTransportPolicy: ice.relayOnly ? "relay" : "all",
+    });
 
     this.pc.onicecandidate = ({ candidate }) => {
-      if (candidate) {
-        this.cb.onSignal("ice", JSON.stringify(candidate));
+      if (!candidate) return;
+      const init = candidate.toJSON();
+      if (ice.relayOnly) {
+        // The browser only gathers relay candidates under this policy; this
+        // also zeroes the related address (our public IP) before it leaves.
+        const clean = sanitizeCandidate(init.candidate ?? "");
+        if (clean === null) return;
+        init.candidate = clean;
       }
+      this.cb.onSignal("ice", JSON.stringify(init));
     };
 
     this.pc.onnegotiationneeded = async () => {
