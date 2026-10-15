@@ -50,7 +50,7 @@ I went through the four routes with curl and tried to break them as a second, ho
 | 1 | Session ids were public and were the only credential | Critical | Fixed |
 | 2 | Server relayed any signal to anyone (no connection state) | High | Fixed |
 | 3 | No rate limiting anywhere | High | Fixed |
-| 4 | WebRTC reveals each person's public IP to the stranger | High (privacy) | Not fixable within the rules, see below |
+| 4 | WebRTC reveals each person's public IP to the stranger | High (privacy) | Fixed when TURN keys are set (optional), see below |
 | 5 | Dot positions could be averaged back to the real location | Medium (privacy) | Fixed within a session |
 | 6 | Pulse could be framed by another site (clickjacking) | Medium | Fixed |
 | 7 | Loose input validation, unbounded bodies and chat messages | Low | Fixed |
@@ -59,7 +59,13 @@ I went through the four routes with curl and tried to break them as a second, ho
 1. **Impersonation.** Every poll returns everyone's id, and that id was all you needed to act as someone. I confirmed you could poll as another user and drain their mailbox (stealing their requests, SDP and ICE candidates with IP addresses), send signals as them, and remove them from the map via `/api/leave`. Now each tab makes a random 32-byte secret that only travels in POST bodies, and the public id is `sha256(secret)`. Knowing someone's id lets you send them a request and nothing else. `/api/poll` moved from GET to POST so the secret never ends up in a URL or a log, and returns nothing until you've joined, so you can't scrape positions without being on the map yourself.
 2. **No server-side state.** Even with real identities, a forged `accept` marked any stranger busy, which greys out their dot and auto-declines every real request to them. Offers could be pushed at people who never agreed to connect. Presence now records `peerId`, and `/api/signal` enforces the flow: accept only works if that person actually requested you and is still waiting, SDP/ICE only flows between the two partners, and end/decline only touch rows that point at each other.
 3. **Rate limits.** These are counted in Postgres, because in-memory counters don't hold on Vercel, where every instance has its own memory. Join is 30/min per IP. Poll is 120/min per session (the client needs about 40). Signals are 300/min per session. Requests are 10/min, and 3 per 2 minutes to the same person, since a request is what lands on a stranger's screen. To offset the extra query, poll housekeeping now runs on about 1 in 4 polls instead of every one.
-4. **IP exposure (not fixed).** Once two people connect, WebRTC ICE candidates include each side's public IP, and IP geolocation can be city-level or better, which undercuts the 1–3 km offset. The real fix is relaying media through TURN (`iceTransportPolicy: "relay"`), which needs an external TURN service, and the requirements rule those out. ICE is already only exchanged after both people accept. I'd put this first on the list for a real launch.
+4. **IP exposure.** Once two people connect, WebRTC ICE candidates include each side's public IP, and IP geolocation can be city-level or better, which undercuts the 1–3 km offset. The fix is relaying all media through TURN. The requirements say Pulse must deploy with no external services, so TURN is optional. Without keys, calls still connect directly over STUN, as before. With `TURN_KEY_ID` and `TURN_KEY_API_TOKEN` set (Cloudflare TURN), they're relay-only:
+   - `/api/ice` mints short-lived TURN credentials (4 hours). It only does so for someone in a live, mutual connection, and caps it at 6 per minute per session. So browsing the map can't burn relay quota, and a leaked credential expires by itself.
+   - The client builds the peer connection after the accept, once it has credentials, with `iceTransportPolicy: "relay"`. The browser then never gathers host or server-reflexive candidates. Signals that arrive while the credentials are loading are held and replayed in order.
+   - Even relay candidates carry `raddr`, which is the sender's public IP. The client zeroes it before sending, and `/api/signal` does it again on the server. The server also rejects any non-relay candidate and strips them from offer/answer SDP. That covers tabs still running an older bundle during a deploy.
+   - If the relay is configured but unreachable, the call is refused instead of quietly falling back to a direct connection.
+
+   The trade-off is that every call's media passes through Cloudflare, so Cloudflare sees both IPs and bills the bandwidth. One vendor under contract seeing your IP beats a stranger seeing it. Tests for the candidate filtering are in `tests/ice.test.mjs`.
 5. **Averaging.** A fresh random offset on every re-join would let an observer collect samples and average them back to the real spot. The offset is now derived from the session secret, so a session always lands in the same place. Across many separate sessions the same person's dots could still be averaged. Snapping to a grid first would help, but it breaks the "1–3 km" rule as written, so I left it as a note.
 6. **Headers.** `frame-ancestors 'none'` plus `X-Frame-Options`, so nobody can overlay Pulse and trick a click on "Accept". A `Permissions-Policy` limiting camera, mic and location to Pulse itself. Also nosniff, no-referrer and HSTS. I didn't add a full CSP: Mapbox needs workers, blob URLs and several hosts, and getting that wrong breaks the map.
 7. **Validation.** Strict id and secret formats, a JSON payload required only for SDP/ICE, request body size caps, and chat capped at 2000 characters on both sides (it's peer-to-peer, so the server can't police it). I also removed a leftover ngrok host from the dev config.
@@ -69,7 +75,7 @@ I went through the four routes with curl and tried to break them as a second, ho
 
 Checked and fine: SQL injection (Prisma parameterises, and the raw queries use tagged templates, which are parameterised too), XSS (React escapes chat text), CSRF (no cookies; the secret is in the body).
 
-Next, with more time: TURN relay-only, a full CSP, and block/report so people can protect themselves (which is where Phase 4 comes in).
+Next, with more time: a full CSP, and block/report so people can protect themselves (which is where Phase 4 comes in).
 
 ## Phase 4: Make it better
 

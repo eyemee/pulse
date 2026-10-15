@@ -3,6 +3,7 @@
 // `secret` is this tab's private session key. It only ever travels in POST
 // bodies; the public id other people see is derived from it on the server.
 import type { PollResponse, SignalType } from "@/lib/types";
+import type { IceConfig } from "@/lib/webrtc";
 
 // 32 random bytes, base64url. getRandomValues (unlike randomUUID) also works
 // outside secure contexts, though the app needs one for location anyway.
@@ -91,5 +92,19 @@ export async function block(secret: string, targetId: string): Promise<boolean> 
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+// TURN credentials for the connection we're in (see /api/ice). null when the
+// server refused (not connected any more, rate-limited, relay down).
+export async function fetchIceConfig(secret: string): Promise<IceConfig | null> {
+  try {
+    const res = await post("/api/ice", { secret });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Partial<IceConfig>;
+    if (!Array.isArray(data.iceServers) || data.iceServers.length === 0) return null;
+    return { iceServers: data.iceServers, relayOnly: data.relayOnly === true };
+  } catch {
+    return null;
   }
 }

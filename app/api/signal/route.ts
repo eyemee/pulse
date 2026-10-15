@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { isValidPeerId, isValidSecret, publicIdFromSecret, readJson } from "@/lib/session";
 import type { SignalType } from "@/lib/types";
 import { allowAll, clientIp, tooMany, type Limit } from "@/lib/rateLimit";
+import { sanitizeIcePayload, sanitizeSdpPayload } from "@/lib/ice";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,13 +49,25 @@ export async function POST(request: Request) {
   }
 
   const signalType = type as SignalType;
-  const payloadStr = typeof payload === "string" ? payload : null;
+  let payloadStr = typeof payload === "string" ? payload : null;
 
   // SDP/ICE messages carry a JSON payload; control messages carry none.
   const needsPayload =
     signalType === "offer" || signalType === "answer" || signalType === "ice";
   if (needsPayload !== (payloadStr !== null) || (payloadStr && !isJson(payloadStr))) {
     return Response.json({ error: "invalid payload" }, { status: 400 });
+  }
+
+  // Relay-only enforcement. Only relay candidates may cross the mailbox, with
+  // their related address zeroed (see lib/ice.ts). The current client never
+  // sends anything else; this covers tabs still running a pre-relay bundle
+  // and any client that ignores iceTransportPolicy.
+  if (payloadStr && relayEnforced()) {
+    payloadStr =
+      signalType === "ice" ? sanitizeIcePayload(payloadStr) : sanitizeSdpPayload(payloadStr);
+    if (payloadStr === null) {
+      return Response.json({ error: "only relay candidates are accepted" }, { status: 400 });
+    }
   }
 
   // A call setup is a few dozen signals (ICE trickle); video renegotiation
@@ -167,6 +180,12 @@ export async function POST(request: Request) {
   }
 
   return Response.json({ ok: true });
+}
+
+// On whenever TURN is configured (then /api/ice only hands out relay
+// servers). Without TURN keys calls fall back to STUN, so nothing is filtered.
+function relayEnforced(): boolean {
+  return Boolean(process.env.TURN_KEY_ID && process.env.TURN_KEY_API_TOKEN);
 }
 
 function isJson(s: string): boolean {

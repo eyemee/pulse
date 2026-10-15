@@ -7,7 +7,16 @@ import SearchBox from "./components/SearchBox";
 import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
-import { block, join, leave, newSessionSecret, onlineCount, poll, sendSignal } from "@/lib/api";
+import {
+  block,
+  fetchIceConfig,
+  join,
+  leave,
+  newSessionSecret,
+  onlineCount,
+  poll,
+  sendSignal,
+} from "@/lib/api";
 import { distanceKm, formatDistance, type LatLng } from "@/lib/geo";
 import { LinkIcon, LocateIcon, NextIcon } from "./components/icons";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
@@ -84,6 +93,9 @@ export default function Home() {
   };
 
   const peerRef = useRef<PeerSession | null>(null);
+  // Offer/answer/ICE that arrive while TURN credentials are still being
+  // fetched (the peer connection doesn't exist yet). Replayed in order.
+  const earlySignals = useRef<SignalMsg[]>([]);
   const msgId = useRef(0);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Consecutive polls in which our current peer was missing from presence.
@@ -105,6 +117,7 @@ export default function Home() {
     if (requestTimer.current) clearTimeout(requestTimer.current);
     if (notifyPeerId) void sendSignal(secret, notifyPeerId, "end");
     missingPolls.current = 0;
+    earlySignals.current = [];
     peerRef.current?.close();
     peerRef.current = null;
     setLocalStream(null);
@@ -116,8 +129,22 @@ export default function Home() {
     if (message) showNotice(message);
   }
 
-  function startPeer(peerId: string, initiator: boolean) {
-    const ps = new PeerSession(initiator, {
+  // True while we're still setting up / in a connection with this peer.
+  function stillWith(peerId: string): boolean {
+    const c = connRef.current;
+    return (c.kind === "connecting" || c.kind === "connected") && c.peerId === peerId;
+  }
+
+  // Called once the connection is mutual on the server (after "accept"), since
+  // that's the only point /api/ice hands out TURN credentials.
+  async function startPeer(peerId: string, initiator: boolean) {
+    const ice = await fetchIceConfig(secret);
+    if (!stillWith(peerId) || peerRef.current) return; // ended meanwhile
+    if (!ice) {
+      teardown("Couldn't set up a private connection. Try again.", peerId);
+      return;
+    }
+    const ps = new PeerSession(initiator, ice, {
       onSignal: (type: DescType, payload: string) => {
         void sendSignal(secret, peerId, type, payload);
       },
@@ -137,6 +164,11 @@ export default function Home() {
       },
     });
     peerRef.current = ps;
+    const queued = earlySignals.current;
+    earlySignals.current = [];
+    for (const sig of queued) {
+      if (sig.fromId === peerId) void ps.handleSignal(sig.type as DescType, sig.payload ?? "");
+    }
   }
 
   function handleControl(ctrl: PeerControl) {
@@ -209,14 +241,12 @@ export default function Home() {
   function acceptIncoming() {
     if (connRef.current.kind !== "incoming") return;
     const peerId = connRef.current.peerId;
-    startPeer(peerId, false);
     setConn({ kind: "connecting", peerId });
     void sendSignal(secret, peerId, "accept").then((ok) => {
+      if (!stillWith(peerId)) return;
       // Rejected when they cancelled or timed out just before we clicked.
-      const c = connRef.current;
-      if (!ok && c.kind === "connecting" && c.peerId === peerId) {
-        teardown("They're no longer waiting.");
-      }
+      if (!ok) teardown("They're no longer waiting.");
+      else void startPeer(peerId, false);
     });
   }
 
@@ -318,8 +348,8 @@ export default function Home() {
         const c = connRef.current;
         if (c.kind === "requesting" && c.peerId === sig.fromId) {
           if (requestTimer.current) clearTimeout(requestTimer.current);
-          startPeer(sig.fromId, true);
           setConn({ kind: "connecting", peerId: sig.fromId });
+          void startPeer(sig.fromId, true);
         }
         break;
       }
@@ -337,11 +367,14 @@ export default function Home() {
         const c = connRef.current;
         const peerId =
           c.kind === "connecting" || c.kind === "connected" ? c.peerId : null;
-        if (peerRef.current && peerId === sig.fromId) {
+        if (peerId !== sig.fromId) break;
+        if (peerRef.current) {
           void peerRef.current.handleSignal(
             sig.type as DescType,
             sig.payload ?? "",
           );
+        } else if (earlySignals.current.length < 200) {
+          earlySignals.current.push(sig);
         }
         break;
       }
