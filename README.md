@@ -7,8 +7,8 @@
 > - Testing alone: open `/?at=Tokyo` in one window and `/?at=Paris` in another
 >   (a private window, or a second browser). Each joins near that place without a
 >   location prompt, so you don't need DevTools Sensors. `?at=35.68,139.69` also works.
-> - Tests: `npm test` runs unit tests for session identity, input validation and the
->   location privacy offset.
+> - Tests: `npm test` runs unit tests for session identity, input validation, the
+>   location privacy offset and relay-only ICE filtering.
 > - Running locally after pulling: `npm install`, `npx prisma db push`, then `npx prisma generate`
 >   (Phase 4 adds a `Block` table).
 
