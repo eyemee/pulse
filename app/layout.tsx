@@ -20,6 +20,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Android Chrome: shrink the layout when the keyboard opens, so the chat
+  // input stays above it instead of under it. (iOS ignores this and already
+  // keeps a focused input in view.)
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

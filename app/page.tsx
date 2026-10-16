@@ -548,6 +548,7 @@ export default function Home() {
         activePeerId={activePeerId}
         arc={arc}
         canConnect={conn.kind === "idle"}
+        chatOpen={inChat}
         recenterKey={recenterKey}
         camera={camera}
         pairs={pairs}

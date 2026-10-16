@@ -54,25 +54,29 @@ export default function ChatPanel({
   return (
     <aside
       aria-label="Chat with stranger"
-      className="glass-solid slide-in absolute inset-x-0 bottom-0 z-30 flex h-[70dvh] flex-col rounded-t-3xl shadow-[0_-20px_60px_rgba(0,0,0,0.45)] sm:inset-x-auto sm:inset-y-4 sm:right-4 sm:h-auto sm:w-[380px] sm:rounded-3xl"
+      className="glass-solid slide-in absolute inset-x-0 bottom-0 z-30 flex h-[min(70dvh,calc(100dvh-140px))] flex-col rounded-t-3xl shadow-[0_-20px_60px_rgba(0,0,0,0.45)] sm:inset-x-auto sm:inset-y-4 sm:right-4 sm:h-auto sm:w-[380px] sm:rounded-3xl"
     >
-      <header className="flex items-center gap-2 border-b border-hairline py-4 pl-4 pr-3">
+      <header className="flex items-center gap-1.5 border-b border-hairline py-3 pl-3 pr-2.5 sm:gap-2 sm:py-4 sm:pl-4 sm:pr-3">
         <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/5">
           <span className="pulse-dot pointer-events-none" data-active="true" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-semibold leading-tight text-moon">Stranger</p>
-          <p className={`text-xs ${connected ? "text-aurora" : "text-mist"}`}>
-            {connected ? "Connected" : "Connecting…"}
+          {/* One line: on a phone there's ~130px beside the buttons, and the
+              distance used to wrap the header to three lines. */}
+          <p className="truncate text-xs text-mist">
+            <span className={connected ? "text-aurora" : undefined}>
+              {connected ? "Connected" : "Connecting…"}
+            </span>
+            {distanceLabel && <span title={distanceLabel}> · {distanceLabel.replace(/^About /, "~").replace(/ away$/, "")}</span>}
           </p>
-          {distanceLabel && <p className="text-xs leading-snug text-mist">{distanceLabel}</p>}
         </div>
         <button
           onClick={onStartVideo}
           disabled={!connected || videoBusy}
           aria-label="Start video"
           title="Start video"
-          className="grid h-10 w-10 place-items-center rounded-full border border-hairline text-moon transition hover:bg-white/5 disabled:opacity-35"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-hairline text-moon sm:h-10 sm:w-10 transition hover:bg-white/5 disabled:opacity-35"
         >
           <VideoIcon />
         </button>
@@ -80,13 +84,13 @@ export default function ChatPanel({
           onClick={onBlock}
           aria-label="Block this person"
           title="Block: ends the chat and you won't see each other again"
-          className="grid h-10 w-10 place-items-center rounded-full border border-hairline text-mist transition hover:border-signal/40 hover:text-signal"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-hairline text-mist sm:h-10 sm:w-10 transition hover:border-signal/40 hover:text-signal"
         >
           <BlockIcon />
         </button>
         <button
           onClick={onEnd}
-          className="h-10 shrink-0 rounded-full border border-signal/40 px-3.5 text-sm font-medium text-signal transition hover:bg-signal/10"
+          className="h-9 shrink-0 rounded-full border border-signal/40 px-3 sm:h-10 sm:px-3.5 text-sm font-medium text-signal transition hover:bg-signal/10"
         >
           End chat
         </button>

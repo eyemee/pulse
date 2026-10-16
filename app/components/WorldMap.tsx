@@ -59,6 +59,7 @@ export default function WorldMap({
   activePeerId,
   arc,
   canConnect,
+  chatOpen,
   recenterKey,
   camera,
   onPeerClick,
@@ -70,6 +71,7 @@ export default function WorldMap({
   activePeerId: string | null; // the person being called / talked to
   arc: ArcState;
   canConnect: boolean;
+  chatOpen: boolean; // chat panel covers part of the map (bottom sheet / right column)
   recenterKey: number; // bump to fly back to "me"
   camera: CameraCommand | null;
   onPeerClick: (id: string) => void;
@@ -80,6 +82,20 @@ export default function WorldMap({
   const meMarkerRef = useRef<Marker | null>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Bumped on resize / rotation so the chat framing recomputes.
+  const [viewport, setViewport] = useState(0);
+  useEffect(() => {
+    let t = 0;
+    const onResize = () => {
+      window.clearTimeout(t);
+      t = window.setTimeout(() => setViewport((v) => v + 1), 200);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
 
   // Marker click handlers are bound once; read live values through refs.
   const onPeerClickRef = useRef(onPeerClick);
@@ -251,6 +267,55 @@ export default function WorldMap({
       cancelled = true;
     };
   }, [me, ready]);
+
+  const framedRef = useRef(false);
+  // ---- Chat open: frame the conversation in the part of the map you can see ----
+  // On phones the chat is a bottom sheet over ~70% of the screen, on wider
+  // screens a 380px column on the right. Without padding the camera centred
+  // on the full screen, so your light, theirs and the arc between you sat
+  // behind the panel.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !live) return;
+    const motion = prefersReducedMotion() ? { duration: 0 } : { duration: 700 };
+    if (!chatOpen) {
+      // Only undo framing we applied; an unconditional easeTo here would
+      // cancel the fly-in to "you" right after joining.
+      if (framedRef.current) {
+        framedRef.current = false;
+        map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, ...motion });
+      }
+      return;
+    }
+    framedRef.current = true;
+    const el = map.getContainer();
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    const narrow = w < 640;
+    // Mirrors ChatPanel: h-[min(70dvh,calc(100dvh-140px))] / sm:w-[380px] + 16px gap.
+    const sheet = narrow ? Math.min(h * 0.7, h - 140) : 0;
+    const padding = {
+      top: 72, // header row
+      bottom: narrow ? Math.round(sheet) + 24 : 40,
+      left: narrow ? 32 : 60,
+      right: narrow ? 32 : 396 + 40,
+    };
+    const peer = activePeerId ? peers.find((p) => p.id === activePeerId) : undefined;
+    if (me && peer) {
+      map.fitBounds(
+        [
+          [Math.min(me.lng, peer.lng), Math.min(me.lat, peer.lat)],
+          [Math.max(me.lng, peer.lng), Math.max(me.lat, peer.lat)],
+        ],
+        { padding, maxZoom: 5, ...motion },
+      );
+    } else {
+      map.easeTo({ padding, ...motion });
+    }
+    // Reframe when the chat opens/closes or the viewport changes size, not on
+    // every poll (peers changes every 1.5s).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatOpen, ready, live, viewport]);
 
   // ---- Recenter on request ----
   useEffect(() => {

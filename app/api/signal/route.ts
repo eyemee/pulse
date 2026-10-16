@@ -139,10 +139,23 @@ export async function POST(request: Request) {
         data: { busy: true },
       });
       if (claimed.count === 0) return reject("no pending request from this user");
-      await prisma.presence.update({
-        where: { id: fromId },
+      // Claim ourselves the same way. `me.busy` above was read before the
+      // requester was claimed, so two accepts racing from this session (two
+      // tabs sharing a secret, a scripted client) could otherwise both pass
+      // and leave us paired with two people. Only one conditional update can
+      // win; the loser releases the requester it just claimed.
+      const self = await prisma.presence.updateMany({
+        where: { id: fromId, busy: false },
         data: { busy: true, peerId: toId },
       });
+      if (self.count === 0) {
+        await prisma.presence.updateMany({
+          where: { id: toId, peerId: fromId, busy: true },
+          data: { busy: false, peerId: null },
+        });
+        await sendDecline(fromId, toId);
+        return reject("already in a connection");
+      }
       await deliver();
       break;
     }
@@ -159,6 +172,17 @@ export async function POST(request: Request) {
     case "answer":
     case "ice": {
       if (!me.busy || me.peerId !== toId) return reject("not connected to this user");
+      // Both rows must point at each other. Checking only the sender let a
+      // stale pairing (the other side has since moved on, or was reaped and
+      // re-joined) keep pushing call setup at someone now talking to a
+      // third person.
+      const partner = await prisma.presence.findUnique({
+        where: { id: toId },
+        select: { busy: true, peerId: true },
+      });
+      if (!partner?.busy || partner.peerId !== fromId) {
+        return reject("not connected to this user");
+      }
       await deliver();
       break;
     }
